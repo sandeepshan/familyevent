@@ -331,7 +331,18 @@ label.field-label { font-size: 0.78rem; font-weight: 700; color: var(--ink-soft)
 .game-desc { font-size: 0.82rem; color: var(--ink-soft); margin: 6px 0; }
 .game-meta { font-size: 0.75rem; color: var(--ink-soft); display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; }
 .game-star { background: none; border: none; font-size: 1.2rem; cursor: pointer; }
-.game-card-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; }
+.game-card-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; flex-wrap: wrap; gap: 8px; }
+.game-card-foot-actions { display: flex; align-items: center; gap: 6px; }
+.game-script-btn { padding: 5px 10px; font-size: 0.72rem; }
+
+/* ---------- Game script / quiz modal ---------- */
+.script-heading { font-size: 0.85rem; margin: 16px 0 6px; color: var(--maroon-deep); }
+.script-list { margin: 0 0 4px; padding-left: 20px; font-size: 0.85rem; color: var(--ink); display: flex; flex-direction: column; gap: 6px; }
+.script-list li { padding-left: 2px; }
+.quiz-card { background: var(--cream-deep); border-radius: var(--radius-sm); padding: 16px; text-align: center; margin-top: 4px; }
+.quiz-question { font-weight: 700; font-size: 0.95rem; margin-bottom: 10px; }
+.quiz-answer { background: var(--white); border: 1.5px solid var(--green); color: var(--green); border-radius: var(--radius-sm); padding: 8px 10px; font-weight: 700; font-size: 0.86rem; }
+.quiz-nav { display: flex; gap: 8px; justify-content: center; margin-top: 12px; flex-wrap: wrap; }
 
 /* ---------- Modal ---------- */
 .modal-overlay {
