@@ -103,6 +103,11 @@
         </div>
       </div>
 
+      <div class="card" id="weatherCard" hidden>
+        <h3>🌤️ Forecast for the day</h3>
+        <div id="weatherContent"></div>
+      </div>
+
       <div class="progress-card" id="budgetProgressCard" hidden>
         <div class="progress-card-head">
           <span>Budget used</span>
@@ -131,6 +136,18 @@
         </div>
 
         <div class="card">
+          <h3>🙋 Crew &amp; volunteers</h3>
+          <p class="muted" style="margin-top:-4px">Sign up for a setup, cleanup or hosting role — anyone can join or leave a role.</p>
+          <form id="crewRoleForm" class="inline-form">
+            <input type="text" id="crewRoleInput" class="input" placeholder="e.g. Sound &amp; music crew" />
+            <button type="submit" class="btn btn-primary">Add role</button>
+          </form>
+          <ul id="crewRoleList" class="crew-role-list">
+            <li class="muted">Loading roles…</li>
+          </ul>
+        </div>
+
+        <div class="card">
           <h3>🧺 Things to bring</h3>
           <form id="wishlistForm" class="inline-form">
             <input type="text" id="wishlistInput" class="input" placeholder="e.g. extra chairs, speaker, extension cord" />
@@ -150,6 +167,15 @@
           <ul id="guestbookList" class="guestbook-list">
             <li class="muted">No messages yet — be the first!</li>
           </ul>
+        </div>
+
+        <div class="card">
+          <h3>📣 Share &amp; remind</h3>
+          <p class="muted" style="margin-top:-4px">Send the committee a quick reminder with the event details.</p>
+          <div class="quick-actions">
+            <a class="btn" id="shareWhatsappBtn" href="https://wa.me/" target="_blank" rel="noopener">💬 Share on WhatsApp</a>
+            <a class="btn" id="shareEmailBtn" href="mailto:">✉️ Share by email</a>
+          </div>
         </div>
       </div>
     </section>
@@ -207,6 +233,7 @@
             <thead>
               <tr>
                 <th>Family / Person</th>
+                <th>Phone</th>
                 <th>Adults</th>
                 <th>Kids 5–12</th>
                 <th>Kids &lt;5</th>
@@ -221,7 +248,7 @@
               </tr>
             </thead>
             <tbody id="attendeeTableBody">
-              <tr class="empty-row"><td colspan="12">No attendees yet. Add the first family above!</td></tr>
+              <tr class="empty-row"><td colspan="13">No attendees yet. Add the first family above!</td></tr>
             </tbody>
           </table>
         </div>
@@ -317,6 +344,7 @@
         <h2>Photo wall</h2>
         <div class="panel-actions">
           <button class="btn btn-ghost" id="slideshowBtn">▶️ Slideshow</button>
+          <button class="btn btn-ghost" id="photoWallBtn">📺 Photo Wall (TV)</button>
           <button class="btn btn-ghost" id="downloadAllBtn">⬇️ Download all (ZIP)</button>
           <button class="btn btn-ghost" id="downloadPptxBtn">📊 Export PowerPoint</button>
           <label class="btn btn-primary file-btn">
@@ -387,6 +415,18 @@
     <button class="btn btn-ghost slideshow-toggle" id="slideshowLikeBtn">🤍 Like</button>
     <button class="btn btn-ghost slideshow-toggle" id="slideshowPlayBtn">⏸️ Pause</button>
   </div>
+</div>
+
+<!-- ============ Photo Wall (TV display mode) ============ -->
+<div id="photoWallOverlay" class="wall-overlay hidden">
+  <div class="wall-header">
+    <div class="wall-title">
+      <span id="wallEventName">Family Get-Together</span>
+      <span class="wall-count" id="wallPhotoCount">0 photos</span>
+    </div>
+    <button class="wall-close" id="wallCloseBtn" aria-label="Exit photo wall">✕ Exit</button>
+  </div>
+  <div class="wall-grid" id="wallGrid"></div>
 </div>
 
 <div id="toast" class="toast hidden"></div>
