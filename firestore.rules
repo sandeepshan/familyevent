@@ -1,0 +1,62 @@
+rules_version = '2';
+
+// -----------------------------------------------------------------------------
+// Get-Together Central — Firestore rules
+//
+// This app has NO login (by design — the whole point is that any committee
+// member can open the link and add things without creating an account).
+// That means these rules can't tell "your committee" apart from "a stranger
+// who finds the URL" — the URL itself (and not sharing it publicly) is what
+// keeps this private. Rules below only stop obviously-bad writes: wrong
+// data shapes, oversized text, and access to any collection this app
+// doesn't use.
+//
+// To apply: Firebase console → Firestore Database → Rules → paste this → Publish.
+// -----------------------------------------------------------------------------
+
+function isReasonableString(v, maxLen) {
+  return v is string && v.size() <= maxLen;
+}
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /settings/eventInfo {
+      allow read: if true;
+      allow write: if request.resource.data.eventName is string
+                   && request.resource.data.eventName.size() <= 120;
+    }
+
+    match /attendees/{docId} {
+      allow read: if true;
+      allow create: if isReasonableString(request.resource.data.familyName, 120)
+                    && request.resource.data.adults is int
+                    && request.resource.data.kids512 is int
+                    && request.resource.data.kidsU5 is int;
+      allow update, delete: if true;
+    }
+
+    match /budgetItems/{docId} {
+      allow read: if true;
+      allow create: if isReasonableString(request.resource.data.itemName, 160)
+                    && request.resource.data.quantity is number
+                    && request.resource.data.unitPrice is number;
+      allow update, delete: if true;
+    }
+
+    match /games/{docId} {
+      allow read: if true;
+      allow create: if isReasonableString(request.resource.data.name, 160);
+      allow update, delete: if true;
+    }
+
+    match /photos/{docId} {
+      allow read: if true;
+      allow create: if isReasonableString(request.resource.data.storagePath, 300)
+                    && isReasonableString(request.resource.data.downloadURL, 600);
+      allow update, delete: if true;
+    }
+
+    // Everything else is denied by default.
+  }
+}

@@ -1,0 +1,22 @@
+rules_version = '2';
+
+// -----------------------------------------------------------------------------
+// Get-Together Central — Storage rules
+// Anyone with the app link can upload/view photos under photos/ (no login,
+// by design — see firestore.rules for why). Limited to images, 15 MB each,
+// so the app can't be used to host arbitrary files.
+//
+// To apply: Firebase console → Storage → Rules → paste this → Publish.
+// -----------------------------------------------------------------------------
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /photos/{fileName} {
+      allow read: if true;
+      allow write: if request.resource.size < 15 * 1024 * 1024
+                   && request.resource.contentType.matches('image/.*');
+      allow delete: if true;
+    }
+    // Everything else is denied by default.
+  }
+}

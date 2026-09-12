@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>Get-Together Central</title>
+<meta name="description" content="Plan attendees, budget, photos and games for your family get-together — together." />
+<meta name="theme-color" content="#e05d1f" />
+<link rel="manifest" href="manifest.json" />
+<link rel="apple-touch-icon" href="icons/icon-192.png" />
+<link rel="icon" href="icons/icon-192.png" />
+
+<!-- JSZip for "download all photos" -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" defer></script>
+
+<link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+
+<!-- ============ Setup banner (shown until Firebase is configured) ============ -->
+<div id="setupBanner" class="setup-banner hidden">
+  <div class="setup-banner-inner">
+    <h2>⚙️ One more step</h2>
+    <p id="setupBannerMsg">This app needs to be connected to your Firebase project before it can save data.</p>
+    <p>Open <code>js/firebase-config.js</code>, paste in your Firebase project's config, then reload this page. Full instructions are in <code>README.md</code>.</p>
+  </div>
+</div>
+
+<!-- ============ App shell ============ -->
+<div id="app" class="app hidden">
+
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <span class="brand-emoji" aria-hidden="true">🪔</span>
+        <div class="brand-text">
+          <h1 id="eventNameDisplay">Family Get-Together</h1>
+          <p id="eventSubDisplay" class="brand-sub">Plan it together</p>
+        </div>
+      </div>
+      <button id="settingsBtn" class="icon-btn" title="Event settings" aria-label="Event settings">⚙️</button>
+    </div>
+
+    <nav class="tabs" role="tablist" aria-label="Sections">
+      <button class="tab-btn active" data-tab="dashboard" role="tab" aria-selected="true">🏠 <span>Home</span></button>
+      <button class="tab-btn" data-tab="attendees" role="tab" aria-selected="false">👨‍👩‍👧‍👦 <span>Attendees</span></button>
+      <button class="tab-btn" data-tab="budget" role="tab" aria-selected="false">🧾 <span>Budget</span></button>
+      <button class="tab-btn" data-tab="photos" role="tab" aria-selected="false">📸 <span>Photos</span></button>
+      <button class="tab-btn" data-tab="games" role="tab" aria-selected="false">🎉 <span>Games</span></button>
+    </nav>
+  </header>
+
+  <main class="main">
+
+    <!-- ============ DASHBOARD ============ -->
+    <section id="tab-dashboard" class="tab-panel active">
+      <div class="grid stats-grid">
+        <div class="stat-card">
+          <div class="stat-label">Countdown</div>
+          <div class="stat-value" id="statCountdown">—</div>
+          <div class="stat-sub" id="statDateVenue">Set your event date &amp; venue</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Total headcount</div>
+          <div class="stat-value" id="statHeadcount">0</div>
+          <div class="stat-sub" id="statHeadcountBreak">0 adults · 0 kids</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Budget spent</div>
+          <div class="stat-value" id="statBudget">$0</div>
+          <div class="stat-sub" id="statBudgetTarget">No target set</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Photos shared</div>
+          <div class="stat-value" id="statPhotos">0</div>
+          <div class="stat-sub">by the whole family</div>
+        </div>
+      </div>
+
+      <div class="progress-card" id="budgetProgressCard" hidden>
+        <div class="progress-card-head">
+          <span>Budget used</span>
+          <span id="budgetProgressPct">0%</span>
+        </div>
+        <div class="progress-track"><div class="progress-fill" id="budgetProgressFill"></div></div>
+      </div>
+
+      <div class="dashboard-columns">
+        <div class="card">
+          <h3>Quick add</h3>
+          <div class="quick-actions">
+            <button class="btn" data-quick="attendees">➕ Add a family</button>
+            <button class="btn" data-quick="budget">➕ Add an expense</button>
+            <button class="btn" data-quick="photos">📤 Upload photos</button>
+            <button class="btn" data-quick="games">🎲 Pick a game</button>
+          </div>
+        </div>
+        <div class="card">
+          <h3>Committee activity</h3>
+          <ul id="activityFeed" class="activity-feed">
+            <li class="muted">Nothing yet — start adding attendees, expenses or photos!</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ ATTENDEES ============ -->
+    <section id="tab-attendees" class="tab-panel">
+      <div class="panel-head">
+        <h2>Who's coming?</h2>
+        <button class="btn btn-primary" id="addAttendeeBtn">➕ Add family / person</button>
+      </div>
+
+      <div class="grid stats-grid compact">
+        <div class="stat-card"><div class="stat-label">Families / entries</div><div class="stat-value" id="attFamilies">0</div></div>
+        <div class="stat-card"><div class="stat-label">Adults</div><div class="stat-value" id="attAdults">0</div></div>
+        <div class="stat-card"><div class="stat-label">Kids 5–12</div><div class="stat-value" id="attKids512">0</div></div>
+        <div class="stat-card"><div class="stat-label">Kids under 5</div><div class="stat-value" id="attKidsU5">0</div></div>
+        <div class="stat-card highlight"><div class="stat-label">Grand total</div><div class="stat-value" id="attTotal">0</div></div>
+      </div>
+
+      <div class="card table-card">
+        <div class="table-toolbar">
+          <input type="search" id="attendeeSearch" placeholder="Search by name…" class="input" />
+          <button class="btn btn-ghost" id="exportAttendeesBtn">⬇️ Export CSV</button>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table" id="attendeeTable">
+            <thead>
+              <tr>
+                <th>Family / Person</th>
+                <th>Adults</th>
+                <th>Kids 5–12</th>
+                <th>Kids &lt;5</th>
+                <th>Total</th>
+                <th>RSVP</th>
+                <th>Notes</th>
+                <th>Added by</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="attendeeTableBody">
+              <tr class="empty-row"><td colspan="9">No attendees yet. Add the first family above!</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ BUDGET ============ -->
+    <section id="tab-budget" class="tab-panel">
+      <div class="panel-head">
+        <h2>Budget &amp; catering</h2>
+        <button class="btn btn-primary" id="addBudgetBtn">➕ Add item</button>
+      </div>
+
+      <div class="grid stats-grid compact">
+        <div class="stat-card highlight"><div class="stat-label">Total spent</div><div class="stat-value" id="budgetGrandTotal">$0</div></div>
+        <div class="stat-card"><div class="stat-label">Items</div><div class="stat-value" id="budgetItemCount">0</div></div>
+        <div class="stat-card"><div class="stat-label">Cost / adult</div><div class="stat-value" id="budgetPerAdult">$0</div></div>
+        <div class="stat-card"><div class="stat-label">Cost / person</div><div class="stat-value" id="budgetPerPerson">$0</div></div>
+      </div>
+
+      <div class="card" id="categoryBreakdownCard">
+        <h3>By category</h3>
+        <div id="categoryBreakdown" class="category-breakdown"></div>
+      </div>
+
+      <div class="card table-card">
+        <div class="table-toolbar">
+          <select id="budgetCategoryFilter" class="input">
+            <option value="">All categories</option>
+          </select>
+          <button class="btn btn-ghost" id="exportBudgetBtn">⬇️ Export CSV</button>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table" id="budgetTable">
+            <thead>
+              <tr>
+                <th>Item</th>
+                <th>Category</th>
+                <th>Qty</th>
+                <th>Unit price</th>
+                <th>Total</th>
+                <th>Status</th>
+                <th>Added by</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="budgetTableBody">
+              <tr class="empty-row"><td colspan="8">No expenses yet. Add plates, catering, water, decorations…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ PHOTOS ============ -->
+    <section id="tab-photos" class="tab-panel">
+      <div class="panel-head">
+        <h2>Photo wall</h2>
+        <div class="panel-actions">
+          <button class="btn btn-ghost" id="slideshowBtn">▶️ Slideshow</button>
+          <button class="btn btn-ghost" id="downloadAllBtn">⬇️ Download all (ZIP)</button>
+          <label class="btn btn-primary file-btn">
+            📤 Upload photos
+            <input type="file" id="photoInput" accept="image/*" multiple hidden />
+          </label>
+        </div>
+      </div>
+
+      <div id="uploadProgressWrap" class="upload-progress-wrap hidden">
+        <div class="progress-track"><div class="progress-fill" id="uploadProgressFill"></div></div>
+        <span id="uploadProgressLabel">Uploading…</span>
+      </div>
+
+      <div id="photoGrid" class="photo-grid">
+        <p class="muted empty-row" id="photoEmptyMsg">No photos yet — be the first to upload!</p>
+      </div>
+    </section>
+
+    <!-- ============ GAMES ============ -->
+    <section id="tab-games" class="tab-panel">
+      <div class="panel-head">
+        <h2>Fun &amp; games</h2>
+        <div class="panel-actions">
+          <button class="btn btn-ghost" id="surpriseBtn">🎲 Surprise us</button>
+          <button class="btn btn-primary" id="addGameBtn">➕ Add your own</button>
+        </div>
+      </div>
+
+      <div class="filter-chips" id="gameFilterChips">
+        <button class="chip active" data-filter="all">All</button>
+        <button class="chip" data-filter="Icebreaker">Icebreaker</button>
+        <button class="chip" data-filter="Active/Outdoor">Active</button>
+        <button class="chip" data-filter="Indoor/Table">Indoor</button>
+        <button class="chip" data-filter="Kids">Kids</button>
+        <button class="chip" data-filter="Dance/Music">Dance &amp; Music</button>
+        <button class="chip" data-filter="Cultural">Cultural</button>
+        <button class="chip" data-filter="selected">⭐ Our lineup</button>
+      </div>
+
+      <div id="gameList" class="game-grid"></div>
+    </section>
+
+  </main>
+</div>
+
+<!-- ============ Generic modal ============ -->
+<div id="modalOverlay" class="modal-overlay hidden">
+  <div class="modal" id="modalBox" role="dialog" aria-modal="true">
+    <button class="modal-close" id="modalCloseBtn" aria-label="Close">✕</button>
+    <div id="modalContent"></div>
+  </div>
+</div>
+
+<!-- ============ Slideshow lightbox ============ -->
+<div id="slideshowOverlay" class="slideshow-overlay hidden">
+  <button class="slideshow-close" id="slideshowCloseBtn" aria-label="Close slideshow">✕</button>
+  <button class="slideshow-nav prev" id="slideshowPrevBtn" aria-label="Previous">‹</button>
+  <img id="slideshowImg" class="slideshow-img" alt="" />
+  <button class="slideshow-nav next" id="slideshowNextBtn" aria-label="Next">›</button>
+  <div class="slideshow-caption" id="slideshowCaption"></div>
+  <button class="btn btn-ghost slideshow-toggle" id="slideshowPlayBtn">⏸️ Pause</button>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
