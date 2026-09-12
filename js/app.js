@@ -347,7 +347,7 @@ function renderDashboard() {
 function renderActivityFeed() {
   const items = [];
   attendees.forEach((a) => items.push({ ts: a.createdAt, text: `👨‍👩‍👧‍👦 ${a.addedBy || "Someone"} added <b>${escapeHtml(a.familyName)}</b> (${a.adults + a.kids512 + a.kidsU5} people)` }));
-  budgetItems.forEach((b) => items.push({ ts: b.createdAt, text: `🧾 ${b.addedBy || "Someone"} added <b>${escapeHtml(b.itemName)}</b> — ${fmtMoney(b.quantity * b.unitPrice)}` }));
+  budgetItems.forEach((b) => items.push({ ts: b.createdAt, text: `🧾 ${b.addedBy || "Someone"} added <b>${escapeHtml(b.itemName)}</b> — ${fmtMoney(budgetItemTotal(b))}` }));
   photos.forEach((p) => items.push({ ts: p.createdAt, text: `📸 ${p.uploadedBy || "Someone"} uploaded a photo` }));
   scheduleItems.forEach((s) => items.push({ ts: s.createdAt, text: `🗓️ ${s.addedBy || "Someone"} added <b>${escapeHtml(s.title)}</b> to the schedule` }));
   (wishlistItems || []).forEach((w) => items.push({ ts: w.createdAt, text: `🧺 ${w.addedBy || "Someone"} added <b>${escapeHtml(w.text)}</b> to bring` }));
@@ -692,6 +692,16 @@ const CATEGORY_ICONS = {
 
 let budgetItems = [];
 
+// Backward-compatible readers: older entries were saved with quantity × unit
+// price and a Planned/Purchased status; new entries just have a price, an
+// optional assignee, and a done checkbox.
+function budgetItemTotal(b) {
+  return typeof b.price === "number" ? b.price : (Number(b.quantity) || 0) * (Number(b.unitPrice) || 0);
+}
+function budgetItemDone(b) {
+  return typeof b.done === "boolean" ? b.done : b.status === "Purchased";
+}
+
 function initBudget() {
   const filterSel = $("#budgetCategoryFilter");
   BUDGET_CATEGORIES.forEach((c) => {
@@ -762,7 +772,7 @@ function openCategoryCapsModal() {
 }
 
 function budgetGrandTotal(list = budgetItems) {
-  return list.reduce((sum, b) => sum + (Number(b.quantity) || 0) * (Number(b.unitPrice) || 0), 0);
+  return list.reduce((sum, b) => sum + budgetItemTotal(b), 0);
 }
 
 function renderBudget() {
@@ -781,7 +791,7 @@ function renderBudget() {
   const byCat = {};
   budgetItems.forEach((b) => {
     const cat = b.category || "Miscellaneous";
-    byCat[cat] = (byCat[cat] || 0) + (Number(b.quantity) || 0) * (Number(b.unitPrice) || 0);
+    byCat[cat] = (byCat[cat] || 0) + budgetItemTotal(b);
   });
   const breakdownEl = $("#categoryBreakdown");
   const catEntries = Object.entries(byCat).sort((a, b) => b[1] - a[1]);
@@ -809,21 +819,24 @@ function renderBudget() {
 
   const body = $("#budgetTableBody");
   if (!filtered.length) {
-    body.innerHTML = `<tr class="empty-row"><td colspan="8">No expenses yet. Add plates, catering, water, decorations…</td></tr>`;
+    body.innerHTML = `<tr class="empty-row"><td colspan="7">No expenses yet. Add plates, catering, water, decorations…</td></tr>`;
     return;
   }
   body.innerHTML = filtered
     .map((b) => {
-      const total = (Number(b.quantity) || 0) * (Number(b.unitPrice) || 0);
-      const statusBadge =
-        b.status === "Purchased" ? `<span class="badge badge-purchased">Purchased</span>` : `<span class="badge badge-planned">Planned</span>`;
-      return `<tr>
+      const total = budgetItemTotal(b);
+      const done = budgetItemDone(b);
+      return `<tr class="${done ? "row-done" : ""}">
         <td><strong>${escapeHtml(b.itemName)}</strong></td>
         <td>${CATEGORY_ICONS[b.category] || "📦"} ${escapeHtml(b.category || "")}</td>
-        <td>${b.quantity || 0}</td>
-        <td>${fmtMoney(b.unitPrice || 0)}</td>
         <td><strong>${fmtMoney(total)}</strong></td>
-        <td>${statusBadge}</td>
+        <td class="muted">${b.assignedTo ? escapeHtml(b.assignedTo) : "—"}</td>
+        <td>
+          <label class="done-checkbox-label">
+            <input type="checkbox" data-done="${b.id}" ${done ? "checked" : ""} />
+            ${done ? "✅ Done" : "Planned"}
+          </label>
+        </td>
         <td class="muted">${escapeHtml(b.addedBy || "")}</td>
         <td class="row-actions">
           <button class="icon-action" data-edit="${b.id}" title="Edit">✏️</button>
@@ -837,6 +850,14 @@ function renderBudget() {
     btn.addEventListener("click", () => openBudgetModal(budgetItems.find((b) => b.id === btn.dataset.edit)))
   );
   $$("[data-del]", body).forEach((btn) => btn.addEventListener("click", () => confirmDeleteBudget(btn.dataset.del)));
+  $$("[data-done]", body).forEach((cb) => {
+    cb.addEventListener("change", () => {
+      updateDoc(doc(db, "budgetItems", cb.dataset.done), { done: cb.checked }).catch((err) => {
+        console.error(err);
+        showToast("Couldn't update — check your connection");
+      });
+    });
+  });
 }
 
 function renderCostSplit() {
@@ -893,13 +914,13 @@ function openBudgetModal(existing) {
       ${BUDGET_CATEGORIES.map((c) => `<option ${existing?.category === c ? "selected" : ""}>${c}</option>`).join("")}
     </select>
     <div class="field-row">
-      <div><label class="field-label">Quantity</label><input class="input" id="fBQty" type="number" min="0" step="1" value="${existing?.quantity ?? 1}" /></div>
-      <div><label class="field-label">Unit price</label><input class="input" id="fBPrice" type="number" min="0" step="0.01" value="${existing?.unitPrice ?? ""}" placeholder="0.00" /></div>
+      <div><label class="field-label">Price</label><input class="input" id="fBPrice" type="number" min="0" step="0.01" value="${existing ? budgetItemTotal(existing) || "" : ""}" placeholder="0.00" /></div>
+      <div><label class="field-label">Assigned to <span class="muted">(optional)</span></label><input class="input" id="fBAssigned" value="${escapeHtml(existing?.assignedTo || "")}" placeholder="Who's getting this?" /></div>
     </div>
-    <label class="field-label">Status</label>
-    <select class="input" id="fBStatus">
-      ${["Planned", "Purchased"].map((s) => `<option ${existing?.status === s ? "selected" : ""}>${s}</option>`).join("")}
-    </select>
+    <label class="toggle-row">
+      <span class="field-label" style="margin:0">✅ Already done / purchased</span>
+      <span class="toggle-switch"><input type="checkbox" id="fBDone" ${existing && budgetItemDone(existing) ? "checked" : ""} /><span class="toggle-track"><span class="toggle-thumb"></span></span></span>
+    </label>
     <div class="modal-actions">
       <button class="btn btn-ghost" id="bCancel">Cancel</button>
       <button class="btn btn-primary" id="bSave">${isEdit ? "Save changes" : "Add"}</button>
@@ -915,9 +936,9 @@ function openBudgetModal(existing) {
           const data = {
             itemName,
             category: $("#fBCat", root).value,
-            quantity: parseFloat($("#fBQty", root).value) || 0,
-            unitPrice: parseFloat($("#fBPrice", root).value) || 0,
-            status: $("#fBStatus", root).value,
+            price: parseFloat($("#fBPrice", root).value) || 0,
+            assignedTo: $("#fBAssigned", root).value.trim(),
+            done: $("#fBDone", root).checked,
           };
           try {
             if (isEdit) {
@@ -950,9 +971,9 @@ function confirmDeleteBudget(id) {
 }
 
 function exportBudgetCsv() {
-  const rows = [["Item", "Category", "Quantity", "Unit price", "Total", "Status", "Added by"]];
+  const rows = [["Item", "Category", "Price", "Assigned to", "Done", "Added by"]];
   budgetItems.forEach((b) => {
-    rows.push([b.itemName, b.category, b.quantity, b.unitPrice, (b.quantity || 0) * (b.unitPrice || 0), b.status, b.addedBy || ""]);
+    rows.push([b.itemName, b.category, budgetItemTotal(b), b.assignedTo || "", budgetItemDone(b) ? "Yes" : "No", b.addedBy || ""]);
   });
   downloadCsv(rows, "budget.csv");
 }
@@ -1304,12 +1325,22 @@ async function downloadAllPhotosZip() {
   try {
     const zip = new JSZip();
     let i = 0;
+    let failCount = 0;
     for (const p of photos) {
       i++;
-      const res = await fetch(p.downloadURL);
-      const blob = await res.blob();
-      const ext = (p.contentType || "image/jpeg").split("/")[1] || "jpg";
-      zip.file(`photo_${String(i).padStart(3, "0")}.${ext}`, blob);
+      try {
+        const res = await fetch(p.downloadURL);
+        const blob = await res.blob();
+        const ext = (p.contentType || "image/jpeg").split("/")[1] || "jpg";
+        zip.file(`photo_${String(i).padStart(3, "0")}.${ext}`, blob);
+      } catch (e) {
+        console.error("skipping photo in zip export:", e);
+        failCount++;
+      }
+    }
+    if (failCount > 0 && failCount === photos.length) {
+      showToast("Couldn't load any photos — this usually means Storage CORS isn't set up yet. Ask your app admin to check the README's CORS section.", 8000);
+      return;
     }
     const zipBlob = await zip.generateAsync({ type: "blob" });
     const url = URL.createObjectURL(zipBlob);
@@ -1320,7 +1351,7 @@ async function downloadAllPhotosZip() {
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
-    showToast("Download ready!");
+    showToast(failCount > 0 ? `Download ready — ${failCount} photo${failCount === 1 ? "" : "s"} couldn't be loaded and ${failCount === 1 ? "was" : "were"} skipped.` : "Download ready!");
   } catch (err) {
     console.error(err);
     showToast("Couldn't build the ZIP — try again");
@@ -1344,16 +1375,16 @@ async function downloadPhotosPptx() {
   if (typeof PptxGenJS === "undefined") return showToast("Still loading — try again in a moment");
   showToast("Building your PowerPoint — this can take a bit for lots of photos…", 6000);
 
-  // Theme colours (matching the app's marigold/maroon festive palette).
+  // Theme colours (matching the app's peacock teal / magenta / gold jewel-tone palette).
   // NOTE: we deliberately paint full-bleed rectangle shapes for backgrounds
   // instead of using `slide.background = {color}` — that property currently
   // triggers a "needs repair" prompt in PowerPoint for solid colours.
-  const MAROON_DEEP = "4A1520";
-  const MARIGOLD = "E8730F";
-  const GOLD = "C99A2E";
-  const CREAM = "FFF8EF";
-  const CREAM_DEEP = "FDEEE0";
-  const INK = "2E2015";
+  const MAROON_DEEP = "3A1030"; // deep magenta-plum, used for title/closing backgrounds
+  const MARIGOLD = "0F7C78"; // peacock teal accent
+  const GOLD = "CC9A3D";
+  const CREAM = "FBF8F2";
+  const CREAM_DEEP = "F2ECDC";
+  const INK = "1C2B29";
   const W = 10,
     H = 5.63; // 16:9
 
@@ -1393,6 +1424,7 @@ async function downloadPhotosPptx() {
     const ordered = [...photos].sort((a, b) => (b.likedBy || []).length - (a.likedBy || []).length);
 
     let i = 0;
+    let failCount = 0;
     for (const p of ordered) {
       i++;
       let b64;
@@ -1400,6 +1432,7 @@ async function downloadPhotosPptx() {
         b64 = await imageUrlToBase64(p.downloadURL);
       } catch (e) {
         console.error("skipping photo in pptx export:", e);
+        failCount++;
         continue;
       }
       const slide = pptx.addSlide();
@@ -1443,8 +1476,20 @@ async function downloadPhotosPptx() {
     closing.addText("For celebrating with us", { x: 0.5, y: 3.2, w: W - 1, h: 0.5, align: "center", fontSize: 16, italic: true, color: GOLD });
     closing.addText("Made with ❤️ by the family committee", { x: 0.5, y: 4.5, w: W - 1, h: 0.4, align: "center", fontSize: 11, color: "FFE7C2" });
 
+    if (failCount > 0 && failCount === ordered.length) {
+      // Every single photo failed to load — almost always a Firebase Storage
+      // CORS misconfiguration (the browser blocks fetch() from reading the
+      // image bytes cross-origin), not a code bug. Say so plainly instead of
+      // silently handing back a photo-less deck.
+      showToast("Couldn't load any photos — this usually means Storage CORS isn't set up yet. Ask your app admin to check the README's CORS section.", 8000);
+      return;
+    }
     await pptx.writeFile({ fileName: `${(eventInfo.eventName || "event").replace(/[^a-z0-9]+/gi, "_")}_photos.pptx` });
-    showToast("PowerPoint ready!");
+    if (failCount > 0) {
+      showToast(`PowerPoint ready — ${failCount} photo${failCount === 1 ? "" : "s"} couldn't be loaded and ${failCount === 1 ? "was" : "were"} skipped.`, 7000);
+    } else {
+      showToast("PowerPoint ready!");
+    }
   } catch (err) {
     console.error(err);
     showToast("Couldn't build the PowerPoint — try again");
