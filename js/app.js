@@ -679,6 +679,7 @@ const BUDGET_CATEGORIES = [
   "Photography & Printing",
   "Miscellaneous",
 ];
+const COMMITTEE_MEMBERS = ["Binoy", "Hans", "Manoj", "Joban", "Sojan", "Martin", "Sandeep"];
 const CATEGORY_ICONS = {
   "Catering & Food": "🍛",
   "Water & Beverages": "💧",
@@ -915,7 +916,12 @@ function openBudgetModal(existing) {
     </select>
     <div class="field-row">
       <div><label class="field-label">Price</label><input class="input" id="fBPrice" type="number" min="0" step="0.01" value="${existing ? budgetItemTotal(existing) || "" : ""}" placeholder="0.00" /></div>
-      <div><label class="field-label">Assigned to <span class="muted">(optional)</span></label><input class="input" id="fBAssigned" value="${escapeHtml(existing?.assignedTo || "")}" placeholder="Who's getting this?" /></div>
+      <div><label class="field-label">Assigned to <span class="muted">(optional)</span></label>
+        <select class="input" id="fBAssigned">
+          <option value="">— Unassigned —</option>
+          ${COMMITTEE_MEMBERS.map((m) => `<option ${existing?.assignedTo === m ? "selected" : ""}>${m}</option>`).join("")}
+        </select>
+      </div>
     </div>
     <label class="toggle-row">
       <span class="field-label" style="margin:0">✅ Already done / purchased</span>
