@@ -996,7 +996,7 @@ const SCHEDULE_TYPE_ICONS = {
   "Games & Activities": "🎉",
   Performance: "🎤",
   Speech: "🎙️",
-  Ceremony: "🪔",
+  Ceremony: "🕯️",
   Other: "📌",
 };
 
@@ -1385,6 +1385,40 @@ function loadImageEl(dataUrl) {
   });
 }
 
+// Renders a rich diagonal gradient (indigo → berry → coral) with a few soft
+// glow "orbs" as a background image, instead of a flat colour fill, for a
+// more dynamic, modern look. Generated once and reused across every
+// full-bleed slide in the deck.
+function makeDynamicBackgroundDataUrl(pxW, pxH) {
+  const canvas = document.createElement("canvas");
+  canvas.width = pxW;
+  canvas.height = pxH;
+  const ctx = canvas.getContext("2d");
+  const grad = ctx.createLinearGradient(0, 0, pxW, pxH);
+  grad.addColorStop(0, "#241B3D");
+  grad.addColorStop(0.55, "#7A2D63");
+  grad.addColorStop(1, "#FF7A55");
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, pxW, pxH);
+
+  const orbs = [
+    { x: pxW * 0.12, y: pxH * 0.2, r: pxW * 0.22, color: "rgba(255,193,69,0.30)" },
+    { x: pxW * 0.92, y: pxH * 0.1, r: pxW * 0.16, color: "rgba(255,122,89,0.35)" },
+    { x: pxW * 0.85, y: pxH * 0.92, r: pxW * 0.24, color: "rgba(122,45,99,0.45)" },
+    { x: pxW * 0.05, y: pxH * 0.95, r: pxW * 0.14, color: "rgba(255,193,69,0.18)" },
+  ];
+  orbs.forEach((o) => {
+    const rg = ctx.createRadialGradient(o.x, o.y, 0, o.x, o.y, o.r);
+    rg.addColorStop(0, o.color);
+    rg.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = rg;
+    ctx.beginPath();
+    ctx.arc(o.x, o.y, o.r, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  return canvas.toDataURL("image/jpeg", 0.92);
+}
+
 // Scales a photo to fit *entirely* within a target box (like CSS
 // object-fit: contain — never cropping any of the photo) and returns a
 // JPEG data URL sized to exactly that box, with any left-over space filled
@@ -1432,16 +1466,17 @@ async function downloadPhotosPptx() {
   if (typeof PptxGenJS === "undefined") return showToast("Still loading — try again in a moment");
   showToast("Building your PowerPoint — this can take a bit for lots of photos…", 6000);
 
-  // Theme colours (matching the app's peacock teal / magenta / gold jewel-tone palette).
-  // NOTE: we deliberately paint full-bleed rectangle shapes for backgrounds
-  // instead of using `slide.background = {color}` — that property currently
-  // triggers a "needs repair" prompt in PowerPoint for solid colours.
-  const MAROON_DEEP = "3A1030"; // deep magenta-plum, used for title/closing backgrounds
-  const MARIGOLD = "0F7C78"; // peacock teal accent
-  const GOLD = "CC9A3D";
-  const CREAM = "FBF8F2";
-  const CREAM_DEEP = "F2ECDC";
-  const INK = "1C2B29";
+  // Theme colours: a vibrant indigo → berry → coral gradient with gold
+  // accents, painted as actual gradient background images (see
+  // makeDynamicBackgroundDataUrl) rather than flat fills, for a more
+  // dynamic, layered look than a plain solid colour.
+  const CORAL = "FF7A55";
+  const CORAL_SOFT = "FFA98C";
+  const GOLD = "FFC145";
+  const GOLD_SOFT = "FFD98C";
+  const CREAM = "FFF6EC";
+  const BLUSH = "FBE9E7";
+  const INK = "2B1F2E";
   const W = 10,
     H = 5.63; // 16:9
 
@@ -1449,28 +1484,37 @@ async function downloadPhotosPptx() {
     const pptx = new PptxGenJS();
     pptx.layout = "LAYOUT_16x9";
 
-    const fullBleed = (slide, color) =>
-      slide.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: W, h: H, fill: { color }, line: { type: "none" } });
-    const accentBars = (slide) => {
-      slide.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: W, h: 0.35, fill: { color: MARIGOLD }, line: { type: "none" } });
-      slide.addShape(pptx.ShapeType.rect, { x: 0, y: H - 0.35, w: W, h: 0.35, fill: { color: MARIGOLD }, line: { type: "none" } });
+    // One gradient background image, generated once and reused on every
+    // full-bleed slide (title / word cloud / closing).
+    const bgDataUrl = makeDynamicBackgroundDataUrl(1600, Math.round((1600 * H) / W));
+    const fullBleed = (slide) => slide.addImage({ data: bgDataUrl, x: 0, y: 0, w: W, h: H });
+    // A slim gold hairline top & bottom — a lighter, more modern touch than a
+    // blocky solid bar.
+    const accentLines = (slide) => {
+      slide.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: W, h: 0.045, fill: { color: GOLD }, line: { type: "none" } });
+      slide.addShape(pptx.ShapeType.rect, { x: 0, y: H - 0.045, w: W, h: 0.045, fill: { color: GOLD }, line: { type: "none" } });
     };
     const MALAYALAM_FONT = "Noto Sans Malayalam";
-    const PEACOCK_LIGHT = "5ECBC3";
-    const GOLD_LIGHT = "F0D78C";
 
     // ---------- Opening slide: a word cloud of our group names ----------
     const groupCloud = pptx.addSlide();
-    fullBleed(groupCloud, MAROON_DEEP);
-    accentBars(groupCloud);
-    // A few soft decorative dots for texture, echoing the app's own background pattern.
+    fullBleed(groupCloud);
+    accentLines(groupCloud);
+    // A scatter of small confetti shapes for a fun, festive feel.
     [
-      { x: 0.7, y: 0.7, r: 0.05 }, { x: 9.1, y: 0.65, r: 0.04 }, { x: 0.5, y: 4.85, r: 0.04 },
-      { x: 9.3, y: 4.9, r: 0.05 }, { x: 5.0, y: 0.55, r: 0.035 },
-    ].forEach((d) =>
-      groupCloud.addShape(pptx.ShapeType.ellipse, { x: d.x, y: d.y, w: d.r, h: d.r, fill: { color: GOLD, transparency: 55 }, line: { type: "none" } })
+      { x: 0.6, y: 0.65, w: 0.09, h: 0.09, color: GOLD, shape: "ellipse" },
+      { x: 9.15, y: 0.6, w: 0.12, h: 0.05, color: CORAL_SOFT, shape: "rect", rotate: 30 },
+      { x: 0.45, y: 4.85, w: 0.08, h: 0.08, color: CORAL_SOFT, shape: "ellipse" },
+      { x: 9.35, y: 4.9, w: 0.1, h: 0.1, color: GOLD, shape: "ellipse" },
+      { x: 5.05, y: 0.5, w: 0.11, h: 0.05, color: GOLD_SOFT, shape: "rect", rotate: -20 },
+      { x: 1.6, y: 5.05, w: 0.09, h: 0.09, color: GOLD_SOFT, shape: "ellipse" },
+      { x: 8.3, y: 0.55, w: 0.08, h: 0.08, color: CORAL_SOFT, shape: "ellipse" },
+    ].forEach((c) =>
+      groupCloud.addShape(pptx.ShapeType[c.shape], {
+        x: c.x, y: c.y, w: c.w, h: c.h, fill: { color: c.color }, line: { type: "none" }, rotate: c.rotate || 0,
+      })
     );
-    groupCloud.addText("🪔  OUR GROUPS  🪔", {
+    groupCloud.addText("🎉  OUR GROUPS  🎉", {
       x: 0, y: 0.55, w: W, h: 0.5, align: "center", fontSize: 15, bold: true, color: GOLD, charSpacing: 2,
     });
     // Hand-placed "word cloud" of the family's group names, in Malayalam —
@@ -1478,8 +1522,8 @@ async function downloadPhotosPptx() {
     const cloudWords = [
       { text: "ശ്രീ മാരുതി സൈക്ലിംഗ് ക്ലബ്", x: 0.4, y: 1.15, w: 9.2, h: 0.9, fontSize: 30, color: GOLD, rotate: 0 },
       { text: "ടാർണീറ്റ് ബോയ്സ്", x: 0.15, y: 2.15, w: 4.3, h: 0.75, fontSize: 25, color: "FFFFFF", rotate: -7 },
-      { text: "ജിം ബോയ്സ്", x: 6.9, y: 2.05, w: 2.9, h: 0.75, fontSize: 26, color: PEACOCK_LIGHT, rotate: 6 },
-      { text: "വിൻഡാം ക്യാമ്പേഴ്സ്", x: 0.75, y: 3.15, w: 4.0, h: 0.75, fontSize: 24, color: GOLD_LIGHT, rotate: 5 },
+      { text: "ജിം ബോയ്സ്", x: 6.9, y: 2.05, w: 2.9, h: 0.75, fontSize: 26, color: CORAL_SOFT, rotate: 6 },
+      { text: "വിൻഡാം ക്യാമ്പേഴ്സ്", x: 0.75, y: 3.15, w: 4.0, h: 0.75, fontSize: 24, color: GOLD_SOFT, rotate: 5 },
       { text: "വിൻഡാം ഫിഷിംഗ്", x: 5.5, y: 3.2, w: 3.7, h: 0.75, fontSize: 24, color: CREAM, rotate: -6 },
       { text: "ടാർണീറ്റ് ബൈക്കീസ്", x: 2.6, y: 4.15, w: 4.6, h: 0.7, fontSize: 25, color: "FFFFFF", rotate: 3 },
     ];
@@ -1490,14 +1534,14 @@ async function downloadPhotosPptx() {
       })
     );
     groupCloud.addText(eventInfo.eventName || "Family Get-Together", {
-      x: 0.5, y: H - 0.65, w: W - 1, h: 0.3, align: "center", fontSize: 10, italic: true, color: "FFE7C2",
+      x: 0.5, y: H - 0.65, w: W - 1, h: 0.3, align: "center", fontSize: 10, italic: true, color: GOLD_SOFT,
     });
 
     // ---------- Title slide ----------
     const title = pptx.addSlide();
-    fullBleed(title, MAROON_DEEP);
-    accentBars(title);
-    title.addText("🪔", { x: 0, y: 0.9, w: W, h: 1, align: "center", fontSize: 54 });
+    fullBleed(title);
+    accentLines(title);
+    title.addText("🎉", { x: 0, y: 0.9, w: W, h: 1, align: "center", fontSize: 54 });
     title.addText(eventInfo.eventName || "Family Get-Together", {
       x: 0.5, y: 2.0, w: W - 1, h: 1, align: "center", fontSize: 40, bold: true, color: "FFFFFF", fontFace: "Georgia",
     });
@@ -1511,7 +1555,7 @@ async function downloadPhotosPptx() {
       .join("   ·   ");
     title.addText(dateVenueLine, { x: 0.5, y: 3.05, w: W - 1, h: 0.5, align: "center", fontSize: 15, color: GOLD });
     title.addText(`📸 ${photos.length} photo${photos.length === 1 ? "" : "s"} shared by the family`, {
-      x: 0.5, y: 3.6, w: W - 1, h: 0.5, align: "center", fontSize: 13, italic: true, color: "FFE7C2",
+      x: 0.5, y: 3.6, w: W - 1, h: 0.5, align: "center", fontSize: 13, italic: true, color: GOLD_SOFT,
     });
 
     // Highlights (liked photos) first, so the deck opens with its best moments.
@@ -1531,13 +1575,18 @@ async function downloadPhotosPptx() {
         continue;
       }
       const slide = pptx.addSlide();
-      fullBleed(slide, i % 2 === 0 ? CREAM_DEEP : CREAM);
-      // Frame "card" behind the photo for a polaroid-ish, designed look.
+      slide.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: W, h: H, fill: { color: i % 2 === 0 ? BLUSH : CREAM }, line: { type: "none" } });
+      // Colour-accented frame: a coral backdrop peeking out from behind a
+      // white photo card, for a layered, dynamic card look with real depth.
+      slide.addShape(pptx.ShapeType.rect, {
+        x: 0.47, y: 0.32, w: W - 0.94, h: 4.76,
+        fill: { color: CORAL }, line: { type: "none" },
+      });
       slide.addShape(pptx.ShapeType.rect, {
         x: 0.55, y: 0.4, w: W - 1.1, h: 4.6,
         fill: { color: "FFFFFF" },
         line: { color: GOLD, width: 1.5 },
-        shadow: { type: "outer", color: "000000", opacity: 0.3, blur: 6, offset: 2, angle: 90 },
+        shadow: { type: "outer", color: "241B3D", opacity: 0.35, blur: 8, offset: 3, angle: 90 },
       });
       // b64 is already scaled to fit within this exact box (letterboxed in
       // white, never cropped), so no "sizing" is needed here — that avoids
@@ -1545,7 +1594,7 @@ async function downloadPhotosPptx() {
       slide.addImage({ data: b64, x: 0.75, y: 0.6, w: W - 1.5, h: 4.15 });
       const likeCount = (p.likedBy || []).length;
       if (likeCount > 0) {
-        slide.addShape(pptx.ShapeType.roundRect, { x: W - 1.85, y: 0.5, w: 1.1, h: 0.38, fill: { color: MARIGOLD }, line: { type: "none" }, rectRadius: 0.1 });
+        slide.addShape(pptx.ShapeType.roundRect, { x: W - 1.85, y: 0.5, w: 1.1, h: 0.38, fill: { color: CORAL }, line: { type: "none" }, rectRadius: 0.1 });
         slide.addText("🌟 Highlight", { x: W - 1.85, y: 0.5, w: 1.1, h: 0.38, align: "center", valign: "middle", fontSize: 9, bold: true, color: "FFFFFF" });
       }
       slide.addText(`${eventInfo.eventName || "Family Get-Together"}   ·   ${i}/${ordered.length}`, {
@@ -1555,12 +1604,12 @@ async function downloadPhotosPptx() {
 
     // ---------- Closing slide ----------
     const closing = pptx.addSlide();
-    fullBleed(closing, MAROON_DEEP);
-    accentBars(closing);
-    closing.addText("💛", { x: 0, y: 1.4, w: W, h: 1, align: "center", fontSize: 50 });
+    fullBleed(closing);
+    accentLines(closing);
+    closing.addText("🎉", { x: 0, y: 1.4, w: W, h: 1, align: "center", fontSize: 50 });
     closing.addText("Thank You!", { x: 0.5, y: 2.4, w: W - 1, h: 0.9, align: "center", fontSize: 36, bold: true, color: "FFFFFF", fontFace: "Georgia" });
     closing.addText("For celebrating with us", { x: 0.5, y: 3.2, w: W - 1, h: 0.5, align: "center", fontSize: 16, italic: true, color: GOLD });
-    closing.addText("Made with ❤️ by the family committee", { x: 0.5, y: 4.5, w: W - 1, h: 0.4, align: "center", fontSize: 11, color: "FFE7C2" });
+    closing.addText("Made with ❤️ by the family committee", { x: 0.5, y: 4.5, w: W - 1, h: 0.4, align: "center", fontSize: 11, color: GOLD_SOFT });
 
     if (failCount > 0 && failCount === ordered.length) {
       // Every single photo failed to load — almost always a Firebase Storage
