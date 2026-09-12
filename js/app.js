@@ -1139,6 +1139,7 @@ function initPhotos() {
   $("#photoInput").addEventListener("change", (e) => handlePhotoUpload(e.target.files));
   $("#slideshowBtn").addEventListener("click", () => openSlideshow(0));
   $("#downloadAllBtn").addEventListener("click", downloadAllPhotosZip);
+  $("#downloadPptxBtn").addEventListener("click", downloadPhotosPptx);
   $$("#photoFilterChips .chip").forEach((chip) => {
     chip.addEventListener("click", () => {
       $$("#photoFilterChips .chip").forEach((c) => c.classList.remove("active"));
@@ -1326,6 +1327,130 @@ async function downloadAllPhotosZip() {
   }
 }
 
+// ---------- PowerPoint export ----------
+async function imageUrlToBase64(url) {
+  const res = await fetch(url);
+  const blob = await res.blob();
+  return await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function downloadPhotosPptx() {
+  if (!photos.length) return showToast("No photos to export yet");
+  if (typeof PptxGenJS === "undefined") return showToast("Still loading — try again in a moment");
+  showToast("Building your PowerPoint — this can take a bit for lots of photos…", 6000);
+
+  // Theme colours (matching the app's marigold/maroon festive palette).
+  // NOTE: we deliberately paint full-bleed rectangle shapes for backgrounds
+  // instead of using `slide.background = {color}` — that property currently
+  // triggers a "needs repair" prompt in PowerPoint for solid colours.
+  const MAROON_DEEP = "4A1520";
+  const MARIGOLD = "E8730F";
+  const GOLD = "C99A2E";
+  const CREAM = "FFF8EF";
+  const CREAM_DEEP = "FDEEE0";
+  const INK = "2E2015";
+  const W = 10,
+    H = 5.63; // 16:9
+
+  try {
+    const pptx = new PptxGenJS();
+    pptx.layout = "LAYOUT_16x9";
+
+    const fullBleed = (slide, color) =>
+      slide.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: W, h: H, fill: { color }, line: { type: "none" } });
+    const accentBars = (slide) => {
+      slide.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: W, h: 0.35, fill: { color: MARIGOLD }, line: { type: "none" } });
+      slide.addShape(pptx.ShapeType.rect, { x: 0, y: H - 0.35, w: W, h: 0.35, fill: { color: MARIGOLD }, line: { type: "none" } });
+    };
+
+    // ---------- Title slide ----------
+    const title = pptx.addSlide();
+    fullBleed(title, MAROON_DEEP);
+    accentBars(title);
+    title.addText("🪔", { x: 0, y: 0.9, w: W, h: 1, align: "center", fontSize: 54 });
+    title.addText(eventInfo.eventName || "Family Get-Together", {
+      x: 0.5, y: 2.0, w: W - 1, h: 1, align: "center", fontSize: 40, bold: true, color: "FFFFFF", fontFace: "Georgia",
+    });
+    const start = eventStartDateTime();
+    const dateVenueLine = [
+      start ? start.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" }) : "",
+      eventTimeRangeLabel(),
+      eventInfo.venue,
+    ]
+      .filter(Boolean)
+      .join("   ·   ");
+    title.addText(dateVenueLine, { x: 0.5, y: 3.05, w: W - 1, h: 0.5, align: "center", fontSize: 15, color: GOLD });
+    title.addText(`📸 ${photos.length} photo${photos.length === 1 ? "" : "s"} shared by the family`, {
+      x: 0.5, y: 3.6, w: W - 1, h: 0.5, align: "center", fontSize: 13, italic: true, color: "FFE7C2",
+    });
+
+    // Highlights (liked photos) first, so the deck opens with its best moments.
+    const ordered = [...photos].sort((a, b) => (b.likedBy || []).length - (a.likedBy || []).length);
+
+    let i = 0;
+    for (const p of ordered) {
+      i++;
+      let b64;
+      try {
+        b64 = await imageUrlToBase64(p.downloadURL);
+      } catch (e) {
+        console.error("skipping photo in pptx export:", e);
+        continue;
+      }
+      const slide = pptx.addSlide();
+      fullBleed(slide, i % 2 === 0 ? CREAM_DEEP : CREAM);
+      // Frame "card" behind the photo for a polaroid-ish, designed look.
+      slide.addShape(pptx.ShapeType.rect, {
+        x: 0.55, y: 0.45, w: W - 1.1, h: 4.5,
+        fill: { color: "FFFFFF" },
+        line: { color: GOLD, width: 1.5 },
+        shadow: { type: "outer", color: "000000", opacity: 0.3, blur: 6, offset: 2, angle: 90 },
+      });
+      slide.addImage({
+        data: b64,
+        x: 0.75, y: 0.65, w: W - 1.5, h: 3.75,
+        sizing: { type: "cover", w: W - 1.5, h: 3.75 },
+      });
+      const likeCount = (p.likedBy || []).length;
+      if (likeCount > 0) {
+        slide.addShape(pptx.ShapeType.roundRect, { x: W - 1.85, y: 0.55, w: 1.1, h: 0.38, fill: { color: MARIGOLD }, line: { type: "none" }, rectRadius: 0.1 });
+        slide.addText("🌟 Highlight", { x: W - 1.85, y: 0.55, w: 1.1, h: 0.38, align: "center", valign: "middle", fontSize: 9, bold: true, color: "FFFFFF" });
+      }
+      const captionParts = [];
+      if (p.uploadedBy) captionParts.push(`📤 ${p.uploadedBy}`);
+      if (p.familyTag) captionParts.push(`🏷️ ${p.familyTag}`);
+      if (likeCount) captionParts.push(`❤️ ${likeCount}`);
+      slide.addShape(pptx.ShapeType.rect, { x: 0.75, y: 4.4, w: W - 1.5, h: 0.5, fill: { color: MARIGOLD }, line: { type: "none" } });
+      slide.addText(captionParts.join("     ") || "📸 A moment from the celebration", {
+        x: 0.85, y: 4.4, w: W - 1.7, h: 0.5, align: "center", valign: "middle", fontSize: 12, bold: true, color: "FFFFFF",
+      });
+      slide.addText(`${eventInfo.eventName || "Family Get-Together"}   ·   ${i}/${ordered.length}`, {
+        x: 0.3, y: H - 0.32, w: W - 0.6, h: 0.28, align: "left", fontSize: 8, color: INK,
+      });
+    }
+
+    // ---------- Closing slide ----------
+    const closing = pptx.addSlide();
+    fullBleed(closing, MAROON_DEEP);
+    accentBars(closing);
+    closing.addText("💛", { x: 0, y: 1.4, w: W, h: 1, align: "center", fontSize: 50 });
+    closing.addText("Thank You!", { x: 0.5, y: 2.4, w: W - 1, h: 0.9, align: "center", fontSize: 36, bold: true, color: "FFFFFF", fontFace: "Georgia" });
+    closing.addText("For celebrating with us", { x: 0.5, y: 3.2, w: W - 1, h: 0.5, align: "center", fontSize: 16, italic: true, color: GOLD });
+    closing.addText("Made with ❤️ by the family committee", { x: 0.5, y: 4.5, w: W - 1, h: 0.4, align: "center", fontSize: 11, color: "FFE7C2" });
+
+    await pptx.writeFile({ fileName: `${(eventInfo.eventName || "event").replace(/[^a-z0-9]+/gi, "_")}_photos.pptx` });
+    showToast("PowerPoint ready!");
+  } catch (err) {
+    console.error(err);
+    showToast("Couldn't build the PowerPoint — try again");
+  }
+}
+
 // ---------- Slideshow lightbox ----------
 let slideshowIndex = 0;
 let slideshowTimer = null;
@@ -1441,6 +1566,291 @@ const SEED_GAMES = [
   { name: "Cricket / Backyard Sports", category: "Active/Outdoor", ageGroup: "All ages", groupSize: "Any", duration: "Flexible", props: "Bat, ball, stumps", desc: "If the venue has space, an informal match is always a hit." },
 ];
 
+// Detailed hosting scripts (materials/steps/tips) — and full question banks for
+// the two quiz-style games — for every seeded game suggestion. Keyed by game
+// name so this works for already-seeded Firestore data too, without needing a
+// migration. Custom games the committee adds themselves won't have an entry
+// here, and the script modal handles that gracefully.
+const GAME_SCRIPTS = {
+  "Antakshari (Bollywood Edition)": {
+    materials: ["Nothing required — just enthusiasm! (A bell or timer adds fun pressure)"],
+    steps: [
+      "Split into 2 or more teams and pick a starting letter at random.",
+      "One team sings a line (or hums the tune) of any Bollywood song starting with that letter, within ~15 seconds.",
+      "The next team must start their song with the last letter of the previous song's last word.",
+      "Keep alternating between teams — a team that can't respond in time, repeats a song, or gets it wrong loses a point.",
+      "Play multiple rounds and keep a running score for a full mini-tournament.",
+    ],
+    tips: [
+      "Set a phone timer for suspense.",
+      "Allow one \"help call\" to a teammate per round for younger or newer players.",
+      "Mix old classics and recent hits so every generation can join in.",
+    ],
+  },
+  "Dumb Charades (Bollywood Movies)": {
+    materials: ["15–20 movie names written on folded chits", "A bowl or bag to hold the chits", "A timer"],
+    steps: [
+      "Write Bollywood movie titles on small chits, fold them, and place them in a bowl.",
+      "Split into 2 teams. One player from Team A picks a chit and silently acts it out for their team (60–90 seconds).",
+      "Teammates shout guesses — a correct guess within the time limit scores a point.",
+      "Alternate turns between teams until all chits are used.",
+      "Highest score wins.",
+    ],
+    tips: [
+      "Agree on standard charade signals first (number of words, \"sounds like\", syllable count) so beginners aren't lost.",
+      "Mix old classics with recent hits so all ages can play.",
+    ],
+  },
+  "Tambola / Housie": {
+    materials: ["Tambola/housie tickets (printed sheets or a free app)", "A number caller (app, or a bag of numbered tokens)", "Small prizes"],
+    steps: [
+      "Give each player one or more tickets.",
+      "The caller draws and announces numbers one at a time.",
+      "Players mark matching numbers on their tickets.",
+      "First to complete a pattern (early five, top/middle/bottom line, full house) shouts \"Housie!\" and wins that round's prize.",
+      "Play multiple rounds with different patterns.",
+    ],
+    tips: [
+      "A free housie/tambola app makes calling fair and easy to double-check winning claims.",
+      "Announce which patterns are in play (and their prizes) before each round starts.",
+    ],
+  },
+  "Musical Chairs": {
+    materials: ["Chairs (one fewer than the number of players)", "Music / a speaker"],
+    steps: [
+      "Arrange chairs in a circle, one fewer than the number of players.",
+      "Play music while everyone walks around the chairs.",
+      "Stop the music suddenly — everyone scrambles for a seat.",
+      "Whoever's left standing is out; remove one more chair and repeat.",
+      "Last person seated wins.",
+    ],
+    tips: [
+      "Use a shuffled Bollywood playlist and stop it unpredictably for extra fun.",
+      "For younger kids, try a gentler \"freeze dance\" version with no elimination.",
+    ],
+  },
+  "Passing the Parcel": {
+    materials: ["A gift wrapped in many layers, with a mini prize or forfeit note in each layer", "Music / a speaker"],
+    steps: [
+      "Sit everyone in a circle and start the music.",
+      "Pass the parcel around the circle while the music plays.",
+      "When the music stops, whoever's holding it unwraps one layer and does the forfeit or keeps the prize inside.",
+      "Resume the music and repeat until the final (biggest) layer is reached.",
+    ],
+    tips: [
+      "Mix silly forfeits (sing a line, dance for 10 seconds) with small treats to keep everyone excited to unwrap.",
+      "Have an adult control the music from behind so stops feel random.",
+    ],
+  },
+  "Lemon & Spoon Race": {
+    materials: ["Spoons", "Lemons or limes", "A marked start and finish line"],
+    steps: [
+      "Line up racers, each given a spoon with a lemon balanced on top.",
+      "On \"go\", race to the finish line without dropping the lemon.",
+      "If it drops, pick it up and continue from that spot.",
+      "First to cross the line with the lemon still balanced wins.",
+    ],
+    tips: ["Run heats by age group for fairness.", "An adults-only round is usually the most hilarious one."],
+  },
+  "Three-Legged Race": {
+    materials: ["Scarves or fabric strips to tie legs together", "A marked start and finish line"],
+    steps: [
+      "Pair up (siblings or cousins work great) and tie each pair's inside legs together at the ankle.",
+      "Line up pairs at the start.",
+      "On \"go\", pairs race to the finish, coordinating their tied legs.",
+      "First pair to cross the line without falling wins.",
+    ],
+    tips: ["A short practice walk before the real race helps pairs sync their steps."],
+  },
+  "Tug of War": {
+    materials: ["A sturdy rope", "A marked centreline on the ground"],
+    steps: [
+      "Split into two evenly matched teams.",
+      "Each team grips one end of the rope, with the centreline marked between them.",
+      "On \"go\", both teams pull — the team that drags the other's back foot over the centreline wins.",
+      "Play best-of-three for a decisive winner.",
+    ],
+    tips: ["Balance teams by mixing adults and kids on both sides.", "Play on grass rather than concrete."],
+  },
+  "Balloon Stomp": {
+    materials: ["Balloons", "String"],
+    steps: [
+      "Tie one inflated balloon to each player's ankle with string.",
+      "On \"go\", everyone tries to stomp and pop others' balloons while protecting their own.",
+      "Last player with an unpopped balloon wins.",
+    ],
+    tips: ["Great for kids and playful adults alike.", "Set a clear \"no shoving\" rule before starting."],
+  },
+  "Treasure Hunt": {
+    materials: ["A chain of written clues (prepared in advance)", "A final treasure / small prizes", "Hiding spots around the venue"],
+    steps: [
+      "Prepare a chain of clues ahead of time — each one leads to the next hiding spot, ending at a final treasure.",
+      "Split into mixed-age teams.",
+      "Give each team the first clue; they race to solve it and find the next one.",
+      "First team to reach the final treasure wins it.",
+    ],
+    tips: [
+      "Write clues as simple riddles tied to venue landmarks.",
+      "Scale difficulty so younger kids can contribute — pair them with an older cousin.",
+    ],
+  },
+  "Family Quiz Night": {
+    materials: ["The question list below (or your own)", "A bell/buzzer or just hands-up", "A scorepad"],
+    steps: [
+      "Split into teams of 4–6, mixing generations on each team.",
+      "The host reads questions one at a time, going round by round (Bollywood, Cricket, General Knowledge, Family).",
+      "First team to buzz or raise hands answers — correct is 1 point, wrong passes to the next team.",
+      "Tally scores after all rounds; the highest score wins.",
+    ],
+    tips: [
+      "Add a \"family round\" of questions only your own family would know for the biggest laughs — see the note at the end of the question list.",
+      "Keep a strict time limit per answer (10–15 seconds) to keep the pace lively.",
+    ],
+    questions: [
+      { q: "Which 1995 romantic film starring Shah Rukh Khan and Kajol became the longest continuously-running film in Indian cinema history?", a: "Dilwale Dulhania Le Jayenge (DDLJ)" },
+      { q: "Which music composer, famous for \"Jai Ho\" and an Oscar win for Slumdog Millionaire, is nicknamed the \"Mozart of Madras\"?", a: "A. R. Rahman" },
+      { q: "In the classic film \"Sholay\" (1975), who played the iconic villain Gabbar Singh?", a: "Amjad Khan" },
+      { q: "Which actor is known as the \"King of Bollywood\", starring in classics like DDLJ, Kuch Kuch Hota Hai and Chennai Express?", a: "Shah Rukh Khan" },
+      { q: "Amitabh Bachchan hosts which long-running Indian TV game show — the Hindi version of \"Who Wants to Be a Millionaire?\"", a: "Kaun Banega Crorepati (KBC)" },
+      { q: "Who was known as the \"Nightingale of India\" and sang thousands of playback songs across seven decades?", a: "Lata Mangeshkar" },
+      { q: "Which country won the very first Cricket World Cup, in 1975?", a: "West Indies" },
+      { q: "Who is widely called the \"God of Cricket\" and holds the record for the most international centuries?", a: "Sachin Tendulkar" },
+      { q: "How many players from each team are on the field during a cricket match?", a: "11" },
+      { q: "What's it called when a bowler takes three wickets on three consecutive deliveries?", a: "A hat-trick" },
+      { q: "What is the capital city of India?", a: "New Delhi" },
+      { q: "Diwali, the festival of lights, celebrates the return of which deity from exile, according to the Ramayana?", a: "Lord Rama" },
+      { q: "Which river, flowing through cities like Varanasi, is considered the most sacred in Hinduism?", a: "The Ganges (Ganga)" },
+      { q: "What are the three main colours of the Indian flag, from top to bottom?", a: "Saffron, white, and green" },
+      { q: "Holi, the festival of colours, is typically celebrated in which season?", a: "Spring (around March)" },
+      { q: "👪 FAMILY ROUND: (Host — add 3–5 of your own here!) e.g. \"In what year did [names] get married?\"", a: "Write your own answer before quiz night!" },
+    ],
+  },
+  '"Mr & Mrs" Couple Quiz': {
+    materials: ["The question list below (or your own)", "Two chairs (optional, back-to-back)", "Paper or a small whiteboard for answers"],
+    steps: [
+      "Seat each couple back-to-back, or have one partner step just out of earshot.",
+      "Ask Partner A a question about Partner B (from the list below); they write down or whisper their guess.",
+      "Bring Partner B back and ask the same question about themselves — reveal both answers together.",
+      "A match scores a point for the couple; keep going through the question list and tally at the end.",
+    ],
+    tips: [
+      "Works best with 3 or more couples competing for \"most in-sync couple\".",
+      "Keep questions light and playful, not personal or awkward — swap out any that don't fit a couple.",
+    ],
+    questions: [
+      { q: "Where did you two first meet?", a: "(Compare answers — did they match?)" },
+      { q: "What was your first date?", a: "(Compare answers)" },
+      { q: "What is your partner's favourite food?", a: "(Compare answers)" },
+      { q: "What is your partner's go-to order at a restaurant?", a: "(Compare answers)" },
+      { q: "What's your partner's most-used phrase or catchphrase?", a: "(Compare answers)" },
+      { q: "What was your partner wearing the day you got engaged or married?", a: "(Compare answers)" },
+      { q: "What's one household chore your partner hates doing?", a: "(Compare answers)" },
+      { q: "What's your partner's dream travel destination?", a: "(Compare answers)" },
+      { q: "Who said \"I love you\" first?", a: "(Compare answers)" },
+      { q: "What's your partner's favourite movie or show?", a: "(Compare answers)" },
+      { q: "What's one thing your partner is surprisingly good at?", a: "(Compare answers)" },
+      { q: "What dessert would your partner order, no matter what?", a: "(Compare answers)" },
+      { q: "What's your partner's biggest pet peeve?", a: "(Compare answers)" },
+      { q: "If your partner could have any superpower, what would they pick?", a: "(Compare answers)" },
+      { q: "What's the most romantic thing your partner has ever done for you?", a: "(Compare answers)" },
+    ],
+  },
+  "Rangoli Competition": {
+    materials: ["Rangoli colours/powder or flower petals", "Chalk", "A flat outdoor or indoor space"],
+    steps: [
+      "Mark out equal-sized spaces for each team or individual.",
+      "Set a time limit (30–45 min) and an optional theme (e.g. \"welcome\", \"harvest\", \"peacock\").",
+      "Teams design and fill their rangoli within the space and time given.",
+      "Kids (or a neutral judge) vote for their favourite at the end.",
+    ],
+    tips: ["Have a few reference designs on hand for beginners.", "Lay a plastic sheet underneath for easy cleanup."],
+  },
+  "Mehendi Corner": {
+    materials: ["Henna cones", "Tissues", "Reference design pictures"],
+    steps: [
+      "Set up a table or corner with a henna artist (or willing volunteers) and reference designs.",
+      "Guests drop by throughout the event for a mini or full design.",
+      "Let the henna dry undisturbed for 20–30 minutes before touching it.",
+    ],
+    tips: ["Offer a quick 2-minute \"mini\" design option to keep the queue moving during a busy event."],
+  },
+  "Dandiya / Garba Session": {
+    materials: ["Dandiya sticks (2 per person)", "A Dandiya/Garba playlist", "Open floor space"],
+    steps: [
+      "Clear a circle of open space.",
+      "Everyone forms a circle (or concentric circles) holding dandiya sticks.",
+      "Follow the basic step pattern, tapping sticks with your neighbours in rhythm with the music.",
+      "Rotate the circle direction periodically so everyone dances with different people.",
+    ],
+    tips: ["A short 2-minute demo from anyone who knows the steps at the start helps everyone join in confidently."],
+  },
+  "Bollywood Dance-Off / Karaoke": {
+    materials: ["Speaker", "Playlist or karaoke app / mic"],
+    steps: [
+      "Open the floor and invite anyone to perform — solo, family group, or impromptu.",
+      "Play their chosen song (or karaoke track) while they dance or sing.",
+      "Let the crowd decide favourites with cheers and applause.",
+    ],
+    tips: ["Prime the pump by asking a couple of confident performers — especially the kids — to go first."],
+  },
+  "Fancy Dress / Best Dressed Kids": {
+    materials: ["Costumes (brought from home)", "A runway or open space", "Music (optional)"],
+    steps: [
+      "Announce the theme in advance so kids can prepare costumes.",
+      "Line kids up and let each walk the \"ramp\" one at a time to music.",
+      "Judges (or the whole crowd, by applause) pick favourites in fun categories.",
+      "Everyone gets a small prize or certificate for taking part.",
+    ],
+    tips: ["Give every child a category to \"win\" (most colourful, best smile, etc.) so nobody feels left out."],
+  },
+  "Drawing & Colouring Corner": {
+    materials: ["Paper", "Crayons or colours", "A table"],
+    steps: [
+      "Set up a quiet table with paper and colours.",
+      "Kids can drop in and out freely throughout the event.",
+      "Optional: set a simple theme (\"draw your family\") and display finished pictures on a board.",
+    ],
+    tips: ["Pin finished drawings up on a wall or board — kids love seeing their art displayed."],
+  },
+  "Simplified Housie for Kids": {
+    materials: ["Simple number cards (1–30)", "A caller"],
+    steps: [
+      "Give each child a card with a few numbers on it.",
+      "The caller announces numbers one at a time.",
+      "Kids mark or cover matching numbers.",
+      "First to complete their card shouts out and wins a small prize.",
+    ],
+    tips: ["Keep the number range small and rounds short so younger kids stay engaged."],
+  },
+  "Card Games Corner (Rummy / UNO)": {
+    materials: ["Card decks (Rummy, UNO, etc.)", "A table and chairs"],
+    steps: [
+      "Set up a relaxed table away from the main activity area.",
+      "Anyone can join in for a casual game whenever they like.",
+      "Rotate players in and out as people come and go.",
+    ],
+    tips: ["Keep 2–3 decks on hand — a great low-key option for guests who want a break from louder games."],
+  },
+  "Human Knot": {
+    materials: ["None — just a group of 8–15 people"],
+    steps: [
+      "Stand in a circle, shoulder to shoulder.",
+      "Everyone reaches across and grabs two different people's hands (not the person directly next to them).",
+      "Without letting go, the group works together to untangle into a single circle or connected loop.",
+    ],
+    tips: ["Great icebreaker right at the start of the event, before other games.", "Offer hints if the group gets stuck."],
+  },
+  "Cricket / Backyard Sports": {
+    materials: ["Bat, ball, stumps (or improvised equivalents)"],
+    steps: [
+      "Mark out a simple pitch and boundary.",
+      "Pick teams, mixing ages and skill levels.",
+      "Play an informal, low-stakes match — adjust rules for the space (tennis ball, underarm bowling for kids).",
+    ],
+    tips: ["Keep it casual and inclusive — rotate the batting order so everyone gets a turn."],
+  },
+};
+
 let games = [];
 
 function initGames() {
@@ -1529,7 +1939,10 @@ function renderGames() {
       </div>
       <div class="game-card-foot">
         <span class="muted" style="font-size:0.72rem">${g.isSeed ? "Suggested" : "Added by " + escapeHtml(g.addedBy || "committee")}</span>
-        ${g.isSeed ? "" : `<button class="icon-action" data-del="${g.id}" title="Remove">🗑️</button>`}
+        <span class="game-card-foot-actions">
+          <button class="btn btn-ghost game-script-btn" data-script="${g.id}">${GAME_SCRIPTS[g.name]?.questions ? "🎤 Script & quiz" : "📜 Script"}</button>
+          ${g.isSeed ? "" : `<button class="icon-action" data-del="${g.id}" title="Remove">🗑️</button>`}
+        </span>
       </div>
     </div>`
     )
@@ -1545,6 +1958,129 @@ function renderGames() {
       }
     })
   );
+  $$("[data-script]", listEl).forEach((btn) =>
+    btn.addEventListener("click", () => openGameScriptModal(games.find((g) => g.id === btn.dataset.script)))
+  );
+}
+
+// -----------------------------------------------------------------------------
+// Game script / interactive quiz-mode modal
+// -----------------------------------------------------------------------------
+function shuffleArray(arr) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function openGameScriptModal(game) {
+  if (!game) return;
+  const script = GAME_SCRIPTS[game.name];
+  const quiz = {
+    index: 0,
+    revealed: false,
+    order: script?.questions ? script.questions.map((_, i) => i) : [],
+  };
+
+  const renderBody = () => {
+    const materialsHtml = script?.materials?.length
+      ? `<h4 class="script-heading">🎒 What you'll need</h4><ul class="script-list">${script.materials
+          .map((m) => `<li>${escapeHtml(m)}</li>`)
+          .join("")}</ul>`
+      : "";
+    const stepsHtml = script?.steps?.length
+      ? `<h4 class="script-heading">📋 How to run it</h4><ol class="script-list">${script.steps
+          .map((s) => `<li>${escapeHtml(s)}</li>`)
+          .join("")}</ol>`
+      : "";
+    const tipsHtml = script?.tips?.length
+      ? `<h4 class="script-heading">💡 Hosting tips</h4><ul class="script-list">${script.tips
+          .map((t) => `<li>${escapeHtml(t)}</li>`)
+          .join("")}</ul>`
+      : "";
+    const noScriptHtml = !script
+      ? `<p class="muted" style="margin-top:14px">No detailed script yet for this custom game — the description above is all we've got. Play it by ear!</p>`
+      : "";
+
+    let quizHtml = "";
+    if (script?.questions?.length) {
+      const qIdx = quiz.order[quiz.index];
+      const q = script.questions[qIdx];
+      quizHtml = `
+      <h4 class="script-heading">🎤 Quiz mode — question ${quiz.index + 1} of ${script.questions.length}</h4>
+      <div class="quiz-card">
+        <div class="quiz-question">${escapeHtml(q.q)}</div>
+        ${
+          quiz.revealed
+            ? `<div class="quiz-answer">✅ ${escapeHtml(q.a)}</div>`
+            : `<button class="btn btn-ghost" id="quizRevealBtn">Reveal answer</button>`
+        }
+      </div>
+      <div class="quiz-nav">
+        <button class="btn btn-ghost" id="quizPrevBtn" ${quiz.index === 0 ? "disabled" : ""}>‹ Prev</button>
+        <button class="btn btn-ghost" id="quizShuffleBtn">🔀 Shuffle</button>
+        <button class="btn btn-ghost" id="quizNextBtn" ${quiz.index === script.questions.length - 1 ? "disabled" : ""}>Next ›</button>
+      </div>`;
+    }
+
+    return `
+      <h3>${script ? "📜" : "🎮"} ${escapeHtml(game.name)}</h3>
+      <span class="game-cat-tag">${escapeHtml(game.category || "")}</span>
+      <p class="game-desc" style="margin-top:8px">${escapeHtml(game.desc || "")}</p>
+      <div class="game-meta">
+        <span>👥 ${escapeHtml(game.groupSize || "Any")}</span>
+        <span>⏱️ ${escapeHtml(game.duration || "")}</span>
+        <span>🎒 ${escapeHtml(game.props || "None")}</span>
+      </div>
+      ${materialsHtml}${stepsHtml}${tipsHtml}${noScriptHtml}${quizHtml}
+      <div class="modal-actions">
+        <button class="btn btn-primary" id="scriptCloseBtn">Close</button>
+      </div>
+    `;
+  };
+
+  const mount = (root) => {
+    $("#scriptCloseBtn", root).addEventListener("click", closeModal);
+    const revealBtn = $("#quizRevealBtn", root);
+    if (revealBtn)
+      revealBtn.addEventListener("click", () => {
+        quiz.revealed = true;
+        rerender();
+      });
+    const prevBtn = $("#quizPrevBtn", root);
+    if (prevBtn)
+      prevBtn.addEventListener("click", () => {
+        quiz.index = Math.max(0, quiz.index - 1);
+        quiz.revealed = false;
+        rerender();
+      });
+    const nextBtn = $("#quizNextBtn", root);
+    if (nextBtn)
+      nextBtn.addEventListener("click", () => {
+        quiz.index = Math.min(script.questions.length - 1, quiz.index + 1);
+        quiz.revealed = false;
+        rerender();
+      });
+    const shuffleBtn = $("#quizShuffleBtn", root);
+    if (shuffleBtn)
+      shuffleBtn.addEventListener("click", () => {
+        quiz.order = shuffleArray(script.questions.map((_, i) => i));
+        quiz.index = 0;
+        quiz.revealed = false;
+        rerender();
+      });
+  };
+
+  const rerender = () => {
+    const content = $("#modalContent");
+    if (!content) return;
+    content.innerHTML = renderBody();
+    mount(content);
+  };
+
+  openModal(renderBody(), { onMount: mount });
 }
 
 function toggleGameSelected(id) {
@@ -1631,6 +2167,7 @@ function surpriseGame() {
       </div>
     </div>
     <div class="modal-actions">
+      <button class="btn btn-ghost" id="surpriseScript">📜 View script</button>
       <button class="btn btn-ghost" id="surpriseAgain">🎲 Roll again</button>
       <button class="btn btn-primary" id="surpriseClose">Let's go!</button>
     </div>
@@ -1638,6 +2175,7 @@ function surpriseGame() {
     {
       onMount: (root) => {
         $("#surpriseClose", root).addEventListener("click", closeModal);
+        $("#surpriseScript", root).addEventListener("click", () => openGameScriptModal(pick));
         $("#surpriseAgain", root).addEventListener("click", () => {
           closeModal();
           surpriseGame();
