@@ -38,9 +38,13 @@ service cloud.firestore {
 
     match /budgetItems/{docId} {
       allow read: if true;
+      // Accepts either shape: the current price/assignedTo/done model, or
+      // the older quantity/unitPrice/status model (kept for backward
+      // compatibility with items added before this update).
       allow create: if isReasonableString(request.resource.data.itemName, 160)
-                    && request.resource.data.quantity is number
-                    && request.resource.data.unitPrice is number;
+                    && (request.resource.data.price is number
+                        || (request.resource.data.quantity is number
+                            && request.resource.data.unitPrice is number));
       allow update, delete: if true;
     }
 
@@ -54,6 +58,31 @@ service cloud.firestore {
       allow read: if true;
       allow create: if isReasonableString(request.resource.data.storagePath, 300)
                     && isReasonableString(request.resource.data.downloadURL, 600);
+      allow update, delete: if true;
+    }
+
+    match /scheduleItems/{docId} {
+      allow read: if true;
+      allow create: if isReasonableString(request.resource.data.title, 160)
+                    && isReasonableString(request.resource.data.startTime, 10);
+      allow update, delete: if true;
+    }
+
+    match /wishlistItems/{docId} {
+      allow read: if true;
+      allow create: if isReasonableString(request.resource.data.text, 200);
+      allow update, delete: if true;
+    }
+
+    match /guestbookMessages/{docId} {
+      allow read: if true;
+      allow create: if isReasonableString(request.resource.data.text, 400);
+      allow update, delete: if true;
+    }
+
+    match /crewRoles/{docId} {
+      allow read: if true;
+      allow create: if isReasonableString(request.resource.data.name, 120);
       allow update, delete: if true;
     }
 
