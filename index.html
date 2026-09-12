@@ -17,6 +17,8 @@
 
 <!-- JSZip for "download all photos" -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" defer></script>
+<!-- PptxGenJS for the "Export as PowerPoint" photo showcase -->
+<script src="https://cdn.jsdelivr.net/npm/pptxgenjs@4.0.1/dist/pptxgen.bundle.js" defer></script>
 
 <link rel="stylesheet" href="css/styles.css" />
 </head>
@@ -312,6 +314,7 @@
         <div class="panel-actions">
           <button class="btn btn-ghost" id="slideshowBtn">▶️ Slideshow</button>
           <button class="btn btn-ghost" id="downloadAllBtn">⬇️ Download all (ZIP)</button>
+          <button class="btn btn-ghost" id="downloadPptxBtn">📊 Export PowerPoint</button>
           <label class="btn btn-primary file-btn">
             📤 Upload photos
             <input type="file" id="photoInput" accept="image/*" multiple hidden />
