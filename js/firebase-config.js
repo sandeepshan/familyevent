@@ -10,24 +10,11 @@
 // security rules (see firestore.rules and storage.rules), not by hiding
 // these values.
 // =============================================================================
-
 export const firebaseConfig = {
-  apiKey: "PASTE_YOUR_API_KEY_HERE",
-  authDomain: "PASTE_YOUR_PROJECT.firebaseapp.com",
-  projectId: "PASTE_YOUR_PROJECT_ID",
-  storageBucket: "PASTE_YOUR_PROJECT.appspot.com",
-  messagingSenderId: "PASTE_YOUR_SENDER_ID",
-  appId: "PASTE_YOUR_APP_ID",
+  apiKey: "AIzaSyBBV5N4ufrwe73-_4ZODVq30ZS3MPDvxtI",
+  authDomain: "familyevent-5295d.firebaseapp.com",
+  projectId: "familyevent-5295d",
+  storageBucket: "familyevent-5295d.firebasestorage.app",
+  messagingSenderId: "93841308120",
+  appId: "1:93841308120:web:07130a8dba1550ffb2daad",
 };
-
-// Simple sanity check the rest of the app uses to decide whether to show
-// the "please configure Firebase" banner instead of trying to run.
-export function isFirebaseConfigured(cfg) {
-  return Boolean(
-    cfg &&
-      cfg.apiKey &&
-      !cfg.apiKey.startsWith("PASTE_") &&
-      cfg.projectId &&
-      !cfg.projectId.startsWith("PASTE_")
-  );
-}
