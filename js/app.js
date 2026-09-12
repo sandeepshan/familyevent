@@ -14,7 +14,7 @@ import { firebaseConfig, isFirebaseConfigured } from "./firebase-config.js";
 // Populated inside boot() once the Firebase SDK has loaded.
 let initializeApp;
 let getFirestore, collection, doc, addDoc, updateDoc, deleteDoc, onSnapshot,
-  query, orderBy, serverTimestamp, getDocs, writeBatch, setDoc;
+  query, orderBy, serverTimestamp, getDocs, writeBatch, setDoc, arrayUnion, arrayRemove;
 let getStorage, storageRef, uploadBytesResumable, getDownloadURL, deleteObject;
 
 // -----------------------------------------------------------------------------
@@ -86,7 +86,7 @@ async function boot() {
     ]);
     ({ initializeApp } = appMod);
     ({ getFirestore, collection, doc, addDoc, updateDoc, deleteDoc, onSnapshot,
-      query, orderBy, serverTimestamp, getDocs, writeBatch, setDoc } = fsMod);
+      query, orderBy, serverTimestamp, getDocs, writeBatch, setDoc, arrayUnion, arrayRemove } = fsMod);
     ({ getStorage, uploadBytesResumable, getDownloadURL, deleteObject } = stMod);
     storageRef = stMod.ref;
 
@@ -105,8 +105,11 @@ async function boot() {
   initSettings();
   initAttendees();
   initBudget();
+  initSchedule();
   initPhotos();
   initGames();
+  initWishlist();
+  initGuestbook();
   registerServiceWorker();
 }
 
@@ -140,7 +143,16 @@ function switchTab(name) {
 // =============================================================================
 // EVENT SETTINGS (single doc: settings/eventInfo)
 // =============================================================================
-let eventInfo = { eventName: "Family Get-Together", eventDate: "", venue: "", budgetTarget: 0, currencySymbol: "$" };
+let eventInfo = {
+  eventName: "Family Get-Together",
+  eventDate: "2026-10-09",
+  eventStartTime: "18:00",
+  eventEndTime: "22:00",
+  venue: "Club Alamora, Tarneit",
+  budgetTarget: 0,
+  currencySymbol: "$",
+  categoryCaps: {},
+};
 
 function initSettings() {
   const ref = doc(db, "settings", "eventInfo");
@@ -150,6 +162,8 @@ function initSettings() {
       if (snap.exists()) eventInfo = { ...eventInfo, ...snap.data() };
       renderEventHeader();
       renderDashboard();
+      renderBudget();
+      renderSchedule();
     },
     (err) => console.error("settings listener:", err)
   );
@@ -188,6 +202,16 @@ function openSettingsModal() {
         </select>
       </div>
     </div>
+    <div class="field-row">
+      <div>
+        <label class="field-label">Start time</label>
+        <input class="input" id="setEventStart" type="time" value="${escapeHtml(eventInfo.eventStartTime || "")}" />
+      </div>
+      <div>
+        <label class="field-label">End time</label>
+        <input class="input" id="setEventEnd" type="time" value="${escapeHtml(eventInfo.eventEndTime || "")}" />
+      </div>
+    </div>
     <label class="field-label">Venue</label>
     <input class="input" id="setVenue" value="${escapeHtml(eventInfo.venue || "")}" placeholder="e.g. Green Park Community Hall" />
     <label class="field-label">Budget target (optional)</label>
@@ -204,6 +228,8 @@ function openSettingsModal() {
           const data = {
             eventName: $("#setEventName", root).value.trim() || "Family Get-Together",
             eventDate: $("#setEventDate", root).value || "",
+            eventStartTime: $("#setEventStart", root).value || "",
+            eventEndTime: $("#setEventEnd", root).value || "",
             venue: $("#setVenue", root).value.trim(),
             currencySymbol: $("#setCurrency", root).value,
             budgetTarget: parseFloat($("#setBudgetTarget", root).value) || 0,
@@ -225,24 +251,72 @@ function openSettingsModal() {
 // =============================================================================
 // DASHBOARD
 // =============================================================================
-function renderDashboard() {
-  // Countdown
-  if (eventInfo.eventDate) {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const eventDate = new Date(eventInfo.eventDate + "T00:00:00");
-    const diffDays = Math.round((eventDate - today) / 86400000);
-    let label;
-    if (diffDays > 1) label = `${diffDays} days to go`;
-    else if (diffDays === 1) label = "Tomorrow! 🎉";
-    else if (diffDays === 0) label = "Today! 🎉";
-    else label = `Was ${Math.abs(diffDays)} day${Math.abs(diffDays) === 1 ? "" : "s"} ago`;
-    $("#statCountdown").textContent = label;
-    $("#statDateVenue").textContent = `${eventDate.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}${eventInfo.venue ? " · " + eventInfo.venue : ""}`;
+function eventStartDateTime() {
+  if (!eventInfo.eventDate) return null;
+  const time = eventInfo.eventStartTime || "00:00";
+  const d = new Date(`${eventInfo.eventDate}T${time}:00`);
+  return isNaN(d) ? null : d;
+}
+function eventEndDateTime() {
+  if (!eventInfo.eventDate) return null;
+  const time = eventInfo.eventEndTime || "23:59";
+  const d = new Date(`${eventInfo.eventDate}T${time}:00`);
+  return isNaN(d) ? null : d;
+}
+function fmtTime12(t) {
+  if (!t) return "";
+  const [h, m] = t.split(":").map(Number);
+  if (isNaN(h)) return "";
+  const period = h >= 12 ? "PM" : "AM";
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:${String(m).padStart(2, "0")} ${period}`;
+}
+function eventTimeRangeLabel() {
+  if (!eventInfo.eventStartTime) return "";
+  return `${fmtTime12(eventInfo.eventStartTime)}${eventInfo.eventEndTime ? " – " + fmtTime12(eventInfo.eventEndTime) : ""}`;
+}
+
+function renderHero() {
+  $("#heroEventName").textContent = eventInfo.eventName || "Family Get-Together";
+  const start = eventStartDateTime();
+  if (start) {
+    const dateStr = start.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
+    const timeStr = eventTimeRangeLabel();
+    $("#heroDateTime").textContent = `📅 ${dateStr}${timeStr ? " · " + timeStr : ""}`;
   } else {
-    $("#statCountdown").textContent = "—";
-    $("#statDateVenue").textContent = "Set your event date in ⚙️ settings";
+    $("#heroDateTime").textContent = "📅 Set your date in ⚙️ settings";
   }
+  $("#heroVenue").textContent = eventInfo.venue ? `📍 ${eventInfo.venue}` : "📍 Add a venue";
+
+  if (start) {
+    const now = new Date();
+    const end = eventEndDateTime();
+    const diffDays = Math.ceil((new Date(eventInfo.eventDate + "T00:00:00") - new Date(new Date().toDateString())) / 86400000);
+    if (end && now >= start && now <= end) {
+      $("#heroCountdownNum").textContent = "🎉";
+      $("#heroCountdownLabel").textContent = "Happening right now!";
+    } else if (end && now > end) {
+      $("#heroCountdownNum").textContent = "✅";
+      $("#heroCountdownLabel").textContent = "What a get-together!";
+    } else if (diffDays > 1) {
+      $("#heroCountdownNum").textContent = diffDays;
+      $("#heroCountdownLabel").textContent = "days to go";
+    } else if (diffDays === 1) {
+      $("#heroCountdownNum").textContent = "1";
+      $("#heroCountdownLabel").textContent = "sleep to go!";
+    } else {
+      $("#heroCountdownNum").textContent = "🎉";
+      $("#heroCountdownLabel").textContent = "Today's the day!";
+    }
+  } else {
+    $("#heroCountdownNum").textContent = "—";
+    $("#heroCountdownLabel").textContent = "days to go";
+  }
+}
+
+function renderDashboard() {
+  renderHero();
+  $("#statPrograms").textContent = scheduleItems.length;
 
   // Headcount
   const t = attendeeTotals();
@@ -275,6 +349,9 @@ function renderActivityFeed() {
   attendees.forEach((a) => items.push({ ts: a.createdAt, text: `👨‍👩‍👧‍👦 ${a.addedBy || "Someone"} added <b>${escapeHtml(a.familyName)}</b> (${a.adults + a.kids512 + a.kidsU5} people)` }));
   budgetItems.forEach((b) => items.push({ ts: b.createdAt, text: `🧾 ${b.addedBy || "Someone"} added <b>${escapeHtml(b.itemName)}</b> — ${fmtMoney(b.quantity * b.unitPrice)}` }));
   photos.forEach((p) => items.push({ ts: p.createdAt, text: `📸 ${p.uploadedBy || "Someone"} uploaded a photo` }));
+  scheduleItems.forEach((s) => items.push({ ts: s.createdAt, text: `🗓️ ${s.addedBy || "Someone"} added <b>${escapeHtml(s.title)}</b> to the schedule` }));
+  (wishlistItems || []).forEach((w) => items.push({ ts: w.createdAt, text: `🧺 ${w.addedBy || "Someone"} added <b>${escapeHtml(w.text)}</b> to bring` }));
+  (guestbookMessages || []).forEach((g) => items.push({ ts: g.createdAt, text: `💌 ${g.addedBy || "Someone"} left a message` }));
   items.sort((a, b) => tsMillis(b.ts) - tsMillis(a.ts));
   const feed = $("#activityFeed");
   if (!items.length) {
@@ -303,6 +380,7 @@ function initAttendees() {
       attendees = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       renderAttendees();
       renderDashboard();
+      renderBudget();
     },
     (err) => {
       console.error("attendees listener:", err);
@@ -313,6 +391,26 @@ function initAttendees() {
   $("#addAttendeeBtn").addEventListener("click", () => openAttendeeModal());
   $("#attendeeSearch").addEventListener("input", renderAttendees);
   $("#exportAttendeesBtn").addEventListener("click", exportAttendeesCsv);
+  $("#confirmedOnlyToggle").addEventListener("change", () => {
+    renderAttendees();
+    renderBudget();
+  });
+}
+
+function confirmedOnly() {
+  return $("#confirmedOnlyToggle").checked;
+}
+
+// Catering headcount: adults count as a full head, kids 5-12 as half
+// (smaller portions), kids under 5 are free (don't move the needle on
+// catering quantities). Used to divide catering/budget costs fairly.
+function cateringWeight(a) {
+  return (Number(a.adults) || 0) * 1 + (Number(a.kids512) || 0) * 0.5 + (Number(a.kidsU5) || 0) * 0;
+}
+
+// Trim to at most 1 decimal place, dropping a trailing ".0".
+function formatWeight(n) {
+  return (Math.round(n * 10) / 10).toString();
 }
 
 function attendeeTotals(list = attendees) {
@@ -323,9 +421,10 @@ function attendeeTotals(list = attendees) {
       acc.kids512 += Number(a.kids512) || 0;
       acc.kidsU5 += Number(a.kidsU5) || 0;
       acc.total += (Number(a.adults) || 0) + (Number(a.kids512) || 0) + (Number(a.kidsU5) || 0);
+      acc.cateringHeads += cateringWeight(a);
       return acc;
     },
-    { families: 0, adults: 0, kids512: 0, kidsU5: 0, total: 0 }
+    { families: 0, adults: 0, kids512: 0, kidsU5: 0, total: 0, cateringHeads: 0 }
   );
 }
 
@@ -335,16 +434,21 @@ function renderAttendees() {
     ? attendees.filter((a) => (a.familyName || "").toLowerCase().includes(searchTerm))
     : attendees;
 
-  const t = attendeeTotals(attendees);
+  const statsSource = confirmedOnly() ? attendees.filter((a) => a.rsvp === "Confirmed") : attendees;
+  const t = attendeeTotals(statsSource);
   $("#attFamilies").textContent = t.families;
   $("#attAdults").textContent = t.adults;
   $("#attKids512").textContent = t.kids512;
   $("#attKidsU5").textContent = t.kidsU5;
   $("#attTotal").textContent = t.total;
+  $("#attCateringHeads").textContent = formatWeight(t.cateringHeads);
+
+  renderDietaryRollup(attendees);
+  renderSeatingOverview(attendees);
 
   const body = $("#attendeeTableBody");
   if (!filtered.length) {
-    body.innerHTML = `<tr class="empty-row"><td colspan="9">${searchTerm ? "No matches." : "No attendees yet. Add the first family above!"}</td></tr>`;
+    body.innerHTML = `<tr class="empty-row"><td colspan="10">${searchTerm ? "No matches." : "No attendees yet. Add the first family above!"}</td></tr>`;
     return;
   }
   const rsvpBadge = (r) => {
@@ -361,7 +465,10 @@ function renderAttendees() {
         <td>${a.kids512 || 0}</td>
         <td>${a.kidsU5 || 0}</td>
         <td><strong>${total}</strong></td>
+        <td>${formatWeight(cateringWeight(a))}</td>
+        <td class="muted">${escapeHtml(a.table || "")}</td>
         <td>${rsvpBadge(a.rsvp)}</td>
+        <td class="muted">${escapeHtml(a.dietary || "")}</td>
         <td class="muted">${escapeHtml(a.notes || "")}</td>
         <td class="muted">${escapeHtml(a.addedBy || "")}</td>
         <td class="row-actions">
@@ -378,6 +485,72 @@ function renderAttendees() {
   $$("[data-del]", body).forEach((btn) =>
     btn.addEventListener("click", () => confirmDeleteAttendee(btn.dataset.del))
   );
+}
+
+function renderDietaryRollup(list) {
+  const el = $("#dietaryRollup");
+  const counts = {};
+  list.forEach((a) => {
+    if (!a.dietary) return;
+    a.dietary
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .forEach((tag) => {
+        const key = tag.toLowerCase();
+        counts[key] = counts[key] || { label: tag, count: 0 };
+        counts[key].count++;
+      });
+  });
+  const entries = Object.values(counts).sort((a, b) => b.count - a.count);
+  if (!entries.length) {
+    el.innerHTML = `<p class="muted">Add attendees with dietary notes to see a summary here.</p>`;
+    return;
+  }
+  el.innerHTML = entries
+    .map((e) => `<span class="dietary-tag">🥗 ${escapeHtml(e.label)} <span class="count">${e.count}</span></span>`)
+    .join("");
+}
+
+function renderSeatingOverview(list) {
+  const el = $("#seatingOverview");
+  const groups = {};
+  const unassigned = [];
+  list.forEach((a) => {
+    const heads = (Number(a.adults) || 0) + (Number(a.kids512) || 0) + (Number(a.kidsU5) || 0);
+    if (a.table && a.table.trim()) {
+      const key = a.table.trim();
+      groups[key] = groups[key] || { names: [], heads: 0 };
+      groups[key].names.push(a.familyName);
+      groups[key].heads += heads;
+    } else {
+      unassigned.push(a.familyName);
+    }
+  });
+  const keys = Object.keys(groups).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  if (!keys.length && !unassigned.length) {
+    el.innerHTML = `<p class="muted">Assign tables when adding attendees to see the layout here.</p>`;
+    return;
+  }
+  let html = keys
+    .map(
+      (k) => `
+    <div class="seating-group">
+      <span class="table-heads">${groups[k].heads} 👤</span>
+      <span class="table-name">🪑 ${escapeHtml(k)}</span>
+      <div class="table-families">${escapeHtml(groups[k].names.join(", "))}</div>
+    </div>`
+    )
+    .join("");
+  if (unassigned.length) {
+    html += `
+    <div class="seating-group">
+      <span class="table-heads">${unassigned.length} 👤</span>
+      <span class="table-name">❔ Unassigned</span>
+      <div class="table-families">${escapeHtml(unassigned.join(", "))}</div>
+    </div>`;
+  }
+  el.innerHTML = html;
 }
 
 function openAttendeeModal(existing) {
@@ -399,8 +572,12 @@ function openAttendeeModal(existing) {
         </select>
       </div>
     </div>
-    <label class="field-label">Notes (dietary, allergies, etc.)</label>
-    <input class="input" id="fAttNotes" value="${escapeHtml(existing?.notes || "")}" placeholder="e.g. vegetarian, nut allergy" />
+    <div class="field-row">
+      <div><label class="field-label">Table (optional)</label><input class="input" id="fAttTable" value="${escapeHtml(existing?.table || "")}" placeholder="e.g. Table 3" /></div>
+      <div><label class="field-label">Dietary / allergies</label><input class="input" id="fAttDietary" value="${escapeHtml(existing?.dietary || "")}" placeholder="e.g. Vegetarian, nut allergy" /></div>
+    </div>
+    <label class="field-label">Notes</label>
+    <input class="input" id="fAttNotes" value="${escapeHtml(existing?.notes || "")}" placeholder="Anything else worth knowing" />
     <div class="modal-actions">
       <button class="btn btn-ghost" id="attCancel">Cancel</button>
       <button class="btn btn-primary" id="attSave">${isEdit ? "Save changes" : "Add"}</button>
@@ -419,6 +596,8 @@ function openAttendeeModal(existing) {
             kids512: parseInt($("#fAttKids512", root).value, 10) || 0,
             kidsU5: parseInt($("#fAttKidsU5", root).value, 10) || 0,
             rsvp: $("#fAttRsvp", root).value,
+            table: $("#fAttTable", root).value.trim(),
+            dietary: $("#fAttDietary", root).value.trim(),
             notes: $("#fAttNotes", root).value.trim(),
           };
           try {
@@ -426,6 +605,7 @@ function openAttendeeModal(existing) {
               await updateDoc(doc(db, "attendees", existing.id), data);
             } else {
               data.addedBy = getMyName();
+              data.paid = false;
               data.createdAt = serverTimestamp();
               await addDoc(collection(db, "attendees"), data);
             }
@@ -452,7 +632,7 @@ function confirmDeleteAttendee(id) {
 }
 
 function exportAttendeesCsv() {
-  const rows = [["Family/Person", "Adults", "Kids 5-12", "Kids under 5", "Total", "RSVP", "Notes", "Added by"]];
+  const rows = [["Family/Person", "Adults", "Kids 5-12", "Kids under 5", "Total", "Catering Head", "Table", "RSVP", "Dietary", "Notes", "Added by"]];
   attendees.forEach((a) => {
     rows.push([
       a.familyName,
@@ -460,7 +640,10 @@ function exportAttendeesCsv() {
       a.kids512 || 0,
       a.kidsU5 || 0,
       (a.adults || 0) + (a.kids512 || 0) + (a.kidsU5 || 0),
+      formatWeight(cateringWeight(a)),
+      a.table || "",
       a.rsvp || "",
+      a.dietary || "",
       a.notes || "",
       a.addedBy || "",
     ]);
@@ -535,6 +718,47 @@ function initBudget() {
 
   $("#addBudgetBtn").addEventListener("click", () => openBudgetModal());
   $("#exportBudgetBtn").addEventListener("click", exportBudgetCsv);
+  $("#setCapsBtn").addEventListener("click", openCategoryCapsModal);
+}
+
+function openCategoryCapsModal() {
+  openModal(
+    `
+    <h3>🎯 Category budgets</h3>
+    <p class="muted" style="margin-bottom:10px">Set a soft cap per category — the bar turns red if you go over. Leave blank for no cap.</p>
+    ${BUDGET_CATEGORIES.map(
+      (c) => `
+      <label class="field-label">${CATEGORY_ICONS[c] || ""} ${c}</label>
+      <input class="input" type="number" min="0" step="0.01" data-cap="${escapeHtml(c)}" value="${
+        eventInfo.categoryCaps && eventInfo.categoryCaps[c] ? eventInfo.categoryCaps[c] : ""
+      }" placeholder="No cap" />`
+    ).join("")}
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="capsCancel">Cancel</button>
+      <button class="btn btn-primary" id="capsSave">Save</button>
+    </div>
+  `,
+    {
+      onMount: (root) => {
+        $("#capsCancel", root).addEventListener("click", closeModal);
+        $("#capsSave", root).addEventListener("click", async () => {
+          const caps = {};
+          $$("[data-cap]", root).forEach((inp) => {
+            const v = parseFloat(inp.value);
+            if (v > 0) caps[inp.dataset.cap] = v;
+          });
+          try {
+            await setDoc(doc(db, "settings", "eventInfo"), { categoryCaps: caps }, { merge: true });
+            closeModal();
+            showToast("Category budgets saved");
+          } catch (err) {
+            console.error(err);
+            showToast("Couldn't save — check your connection");
+          }
+        });
+      },
+    }
+  );
 }
 
 function budgetGrandTotal(list = budgetItems) {
@@ -550,7 +774,8 @@ function renderBudget() {
   $("#budgetItemCount").textContent = budgetItems.length;
   const t = attendeeTotals();
   $("#budgetPerAdult").textContent = t.adults > 0 ? fmtMoney(grand / t.adults) : "—";
-  $("#budgetPerPerson").textContent = t.total > 0 ? fmtMoney(grand / t.total) : "—";
+  // Weighted catering headcount: adult = 1, kid 5-12 = 0.5, kid <5 = free.
+  $("#budgetPerPerson").textContent = t.cateringHeads > 0 ? fmtMoney(grand / t.cateringHeads) : "—";
 
   // Category breakdown
   const byCat = {};
@@ -565,16 +790,22 @@ function renderBudget() {
   } else {
     const max = Math.max(...catEntries.map((e) => e[1]), 1);
     breakdownEl.innerHTML = catEntries
-      .map(
-        ([cat, amt]) => `
-      <div class="category-row">
+      .map(([cat, amt]) => {
+        const cap = (eventInfo.categoryCaps && eventInfo.categoryCaps[cat]) || 0;
+        const overCap = cap > 0 && amt > cap;
+        const barPct = cap > 0 ? Math.min(100, (amt / cap) * 100) : (amt / max) * 100;
+        const capNote = cap > 0 ? `<div class="cat-cap-note">${overCap ? "⚠️ " + fmtMoney(amt - cap) + " over" : "of " + fmtMoney(cap)}</div>` : "";
+        return `
+      <div class="category-row ${overCap ? "over-cap" : ""}">
         <span class="cat-name">${CATEGORY_ICONS[cat] || "📦"} ${escapeHtml(cat)}</span>
-        <span class="cat-bar-track"><span class="cat-bar-fill" style="width:${(amt / max) * 100}%"></span></span>
-        <span class="cat-amount">${fmtMoney(amt)}</span>
-      </div>`
-      )
+        <span class="cat-bar-track"><span class="cat-bar-fill" style="width:${barPct}%"></span></span>
+        <span class="cat-amount">${fmtMoney(amt)}${capNote}</span>
+      </div>`;
+      })
       .join("");
   }
+
+  renderCostSplit();
 
   const body = $("#budgetTableBody");
   if (!filtered.length) {
@@ -606,6 +837,48 @@ function renderBudget() {
     btn.addEventListener("click", () => openBudgetModal(budgetItems.find((b) => b.id === btn.dataset.edit)))
   );
   $$("[data-del]", body).forEach((btn) => btn.addEventListener("click", () => confirmDeleteBudget(btn.dataset.del)));
+}
+
+function renderCostSplit() {
+  const summaryEl = $("#costSplitSummary");
+  const listEl = $("#costSplitList");
+  if (!summaryEl || !listEl) return;
+  const statsSource = confirmedOnly() ? attendees.filter((a) => a.rsvp === "Confirmed") : attendees;
+  const grand = budgetGrandTotal(budgetItems);
+  const t = attendeeTotals(statsSource);
+  if (!statsSource.length || grand <= 0 || t.cateringHeads <= 0) {
+    summaryEl.textContent = "Add attendees and expenses to calculate shares.";
+    listEl.innerHTML = "";
+    return;
+  }
+  const perHead = grand / t.cateringHeads;
+  summaryEl.textContent = `${fmtMoney(perHead)} per catering head × ${formatWeight(t.cateringHeads)} heads = ${fmtMoney(grand)} total`;
+  listEl.innerHTML = statsSource
+    .map((a) => {
+      const w = cateringWeight(a);
+      const share = w * perHead;
+      return `
+    <div class="cost-split-row">
+      <div>
+        <div class="cost-split-name">${escapeHtml(a.familyName)}</div>
+        <div class="cost-split-share">${formatWeight(w)} heads · ${fmtMoney(share)}</div>
+      </div>
+      <label class="paid-checkbox-label">
+        <input type="checkbox" data-paid="${a.id}" ${a.paid ? "checked" : ""} />
+        ${a.paid ? "Paid" : "Unpaid"}
+      </label>
+    </div>`;
+    })
+    .join("");
+
+  $$("[data-paid]", listEl).forEach((cb) => {
+    cb.addEventListener("change", () => {
+      updateDoc(doc(db, "attendees", cb.dataset.paid), { paid: cb.checked }).catch((err) => {
+        console.error(err);
+        showToast("Couldn't update — check your connection");
+      });
+    });
+  });
 }
 
 function openBudgetModal(existing) {
@@ -685,6 +958,164 @@ function exportBudgetCsv() {
 }
 
 // =============================================================================
+// SCHEDULE
+// =============================================================================
+let scheduleItems = [];
+const SCHEDULE_TYPES = ["Arrival", "Welcome", "Meal", "Games & Activities", "Performance", "Speech", "Ceremony", "Other"];
+const SCHEDULE_TYPE_ICONS = {
+  Arrival: "🚪",
+  Welcome: "👋",
+  Meal: "🍽️",
+  "Games & Activities": "🎉",
+  Performance: "🎤",
+  Speech: "🎙️",
+  Ceremony: "🪔",
+  Other: "📌",
+};
+
+function initSchedule() {
+  const ref = query(collection(db, "scheduleItems"), orderBy("startTime", "asc"));
+  onSnapshot(
+    ref,
+    (snap) => {
+      scheduleItems = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      renderSchedule();
+      renderDashboard();
+    },
+    (err) => {
+      console.error("schedule listener:", err);
+      showToast("Couldn't load the schedule — check Firestore rules");
+    }
+  );
+
+  $("#addScheduleBtn").addEventListener("click", () => openScheduleModal());
+  $("#printScheduleBtn").addEventListener("click", printSchedule);
+  window.addEventListener("afterprint", () => $("#tab-schedule").classList.remove("printing"));
+}
+
+function printSchedule() {
+  const panel = $("#tab-schedule");
+  panel.classList.add("printing");
+  window.print();
+  setTimeout(() => panel.classList.remove("printing"), 500);
+}
+
+function renderScheduleWindow() {
+  const el = $("#scheduleWindow");
+  if (!eventInfo.eventDate) {
+    el.textContent = "Set your event date, time and venue in ⚙️ settings.";
+    return;
+  }
+  const start = eventStartDateTime();
+  const dateStr = start ? start.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" }) : "";
+  const timeStr = eventTimeRangeLabel();
+  el.textContent = `🕕 ${dateStr}${timeStr ? " · " + timeStr : ""}${eventInfo.venue ? " · 📍 " + eventInfo.venue : ""}`;
+}
+
+function renderSchedule() {
+  renderScheduleWindow();
+  const timeline = $("#scheduleTimeline");
+  if (!scheduleItems.length) {
+    timeline.innerHTML = `<p class="muted empty-row" id="scheduleEmptyMsg">No programs yet — add your first one (welcome, dinner, games, speeches…).</p>`;
+    return;
+  }
+  timeline.innerHTML = scheduleItems
+    .map(
+      (s) => `
+    <div class="schedule-item" data-id="${s.id}">
+      <div class="schedule-item-card">
+        <div class="schedule-time">${fmtTime12(s.startTime)}${s.endTime ? " – " + fmtTime12(s.endTime) : ""}</div>
+        <div class="schedule-title-row">
+          <div>
+            <h4>${escapeHtml(s.title)}</h4>
+            <span class="schedule-type-tag">${SCHEDULE_TYPE_ICONS[s.type] || "📌"} ${escapeHtml(s.type || "Other")}</span>
+          </div>
+          <div class="schedule-actions no-print">
+            <button class="icon-action" data-edit="${s.id}" title="Edit">✏️</button>
+            <button class="icon-action" data-del="${s.id}" title="Delete">🗑️</button>
+          </div>
+        </div>
+        ${s.notes ? `<div class="schedule-notes">${escapeHtml(s.notes)}</div>` : ""}
+      </div>
+    </div>`
+    )
+    .join("");
+
+  $$("[data-edit]", timeline).forEach((btn) =>
+    btn.addEventListener("click", () => openScheduleModal(scheduleItems.find((s) => s.id === btn.dataset.edit)))
+  );
+  $$("[data-del]", timeline).forEach((btn) => btn.addEventListener("click", () => confirmDeleteSchedule(btn.dataset.del)));
+}
+
+function openScheduleModal(existing) {
+  const isEdit = !!existing;
+  openModal(
+    `
+    <h3>${isEdit ? "✏️ Edit" : "➕ Add"} program</h3>
+    <label class="field-label">Program name</label>
+    <input class="input" id="fSchTitle" value="${escapeHtml(existing?.title || "")}" placeholder="e.g. Guest arrival & welcome drinks" />
+    <div class="field-row">
+      <div><label class="field-label">Start time</label><input class="input" id="fSchStart" type="time" value="${existing?.startTime || ""}" /></div>
+      <div><label class="field-label">End time (optional)</label><input class="input" id="fSchEnd" type="time" value="${existing?.endTime || ""}" /></div>
+    </div>
+    <label class="field-label">Type</label>
+    <select class="input" id="fSchType">
+      ${SCHEDULE_TYPES.map((t) => `<option ${existing?.type === t ? "selected" : ""}>${t}</option>`).join("")}
+    </select>
+    <label class="field-label">Notes (optional)</label>
+    <textarea class="input" id="fSchNotes" rows="2" placeholder="Who's running it, special instructions…">${escapeHtml(existing?.notes || "")}</textarea>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="schCancel">Cancel</button>
+      <button class="btn btn-primary" id="schSave">${isEdit ? "Save changes" : "Add"}</button>
+    </div>
+  `,
+    {
+      onMount: (root) => {
+        $("#fSchTitle", root).focus();
+        $("#schCancel", root).addEventListener("click", closeModal);
+        $("#schSave", root).addEventListener("click", async () => {
+          const title = $("#fSchTitle", root).value.trim();
+          const startTime = $("#fSchStart", root).value;
+          if (!title) return showToast("Please enter a program name");
+          if (!startTime) return showToast("Please set a start time");
+          const data = {
+            title,
+            startTime,
+            endTime: $("#fSchEnd", root).value || "",
+            type: $("#fSchType", root).value,
+            notes: $("#fSchNotes", root).value.trim(),
+          };
+          try {
+            if (isEdit) {
+              await updateDoc(doc(db, "scheduleItems", existing.id), data);
+            } else {
+              data.addedBy = getMyName();
+              data.createdAt = serverTimestamp();
+              await addDoc(collection(db, "scheduleItems"), data);
+            }
+            closeModal();
+            showToast(isEdit ? "Updated" : "Added to schedule!");
+          } catch (err) {
+            console.error(err);
+            showToast("Couldn't save — check your connection");
+          }
+        });
+      },
+    }
+  );
+}
+
+function confirmDeleteSchedule(id) {
+  const s = scheduleItems.find((x) => x.id === id);
+  if (!s) return;
+  if (!window.confirm(`Remove "${s.title}" from the schedule?`)) return;
+  deleteDoc(doc(db, "scheduleItems", id)).then(() => showToast("Removed")).catch((err) => {
+    console.error(err);
+    showToast("Couldn't remove — check your connection");
+  });
+}
+
+// =============================================================================
 // PHOTOS
 // =============================================================================
 let photos = [];
@@ -697,6 +1128,7 @@ function initPhotos() {
       photos = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       renderPhotos();
       renderDashboard();
+      if (!$("#slideshowOverlay").classList.contains("hidden")) renderSlide();
     },
     (err) => {
       console.error("photos listener:", err);
@@ -707,32 +1139,49 @@ function initPhotos() {
   $("#photoInput").addEventListener("change", (e) => handlePhotoUpload(e.target.files));
   $("#slideshowBtn").addEventListener("click", () => openSlideshow(0));
   $("#downloadAllBtn").addEventListener("click", downloadAllPhotosZip);
+  $$("#photoFilterChips .chip").forEach((chip) => {
+    chip.addEventListener("click", () => {
+      $$("#photoFilterChips .chip").forEach((c) => c.classList.remove("active"));
+      chip.classList.add("active");
+      renderPhotos();
+    });
+  });
+}
+
+function activePhotoFilter() {
+  const active = $("#photoFilterChips .chip.active");
+  return active ? active.dataset.filter : "all";
 }
 
 function renderPhotos() {
   const grid = $("#photoGrid");
-  const empty = $("#photoEmptyMsg");
-  if (!photos.length) {
-    grid.innerHTML = "";
-    grid.appendChild(empty);
-    empty.classList.remove("hidden");
+  const filter = activePhotoFilter();
+  const list = filter === "highlights" ? photos.filter((p) => (p.likedBy || []).length > 0) : photos;
+  if (!list.length) {
+    const msg = filter === "highlights" ? "No highlights yet — like a photo to feature it here! 🌟" : "No photos yet — be the first to upload!";
+    grid.innerHTML = `<p class="muted empty-row" id="photoEmptyMsg">${escapeHtml(msg)}</p>`;
     return;
   }
-  empty.classList.add("hidden");
-  grid.innerHTML = photos
-    .map(
-      (p, i) => `
-    <div class="photo-tile" data-index="${i}">
+  const myName = localStorage.getItem("gtc_name") || "";
+  grid.innerHTML = list
+    .map((p) => {
+      const idx = photos.indexOf(p);
+      const liked = (p.likedBy || []).includes(myName);
+      const likeCount = (p.likedBy || []).length;
+      return `
+    <div class="photo-tile" data-index="${idx}">
       <img src="${p.downloadURL}" alt="${escapeHtml(p.caption || "Event photo")}" loading="lazy" />
+      ${p.familyTag ? `<span class="photo-tag-chip">🏷️ ${escapeHtml(p.familyTag)}</span>` : ""}
       <button class="photo-delete" data-del="${p.id}" title="Delete">✕</button>
+      <button class="photo-like-btn ${liked ? "liked" : ""}" data-like="${p.id}" title="Like this photo">${liked ? "❤️" : "🤍"}${likeCount ? " " + likeCount : ""}</button>
       <div class="photo-meta">${escapeHtml(p.uploadedBy || "")}</div>
-    </div>`
-    )
+    </div>`;
+    })
     .join("");
 
   $$(".photo-tile", grid).forEach((tile) => {
     tile.addEventListener("click", (e) => {
-      if (e.target.closest("[data-del]")) return;
+      if (e.target.closest("[data-del]") || e.target.closest("[data-like]")) return;
       openSlideshow(parseInt(tile.dataset.index, 10));
     });
   });
@@ -742,6 +1191,24 @@ function renderPhotos() {
       confirmDeletePhoto(btn.dataset.del);
     })
   );
+  $$("[data-like]", grid).forEach((btn) =>
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      togglePhotoLike(btn.dataset.like);
+    })
+  );
+}
+
+function togglePhotoLike(id) {
+  const p = photos.find((x) => x.id === id);
+  if (!p) return;
+  const myName = getMyName();
+  const likedBy = p.likedBy || [];
+  const isLiked = likedBy.includes(myName);
+  updateDoc(doc(db, "photos", id), { likedBy: isLiked ? arrayRemove(myName) : arrayUnion(myName) }).catch((err) => {
+    console.error(err);
+    showToast("Couldn't update — check your connection");
+  });
 }
 
 async function handlePhotoUpload(fileList) {
@@ -792,6 +1259,8 @@ async function handlePhotoUpload(fileList) {
                   downloadURL,
                   uploadedBy: uploaderName,
                   caption: "",
+                  familyTag: "",
+                  likedBy: [],
                   sizeBytes: file.size,
                   contentType: file.type,
                   createdAt: serverTimestamp(),
@@ -877,7 +1346,13 @@ function renderSlide() {
   const p = photos[slideshowIndex];
   if (!p) return;
   $("#slideshowImg").src = p.downloadURL;
-  $("#slideshowCaption").textContent = `${p.uploadedBy ? "📤 " + p.uploadedBy : ""}  ·  ${slideshowIndex + 1} / ${photos.length}`;
+  $("#slideshowCaption").textContent = `${p.uploadedBy ? "📤 " + p.uploadedBy : ""}  ·  ${slideshowIndex + 1} / ${photos.length}${
+    p.familyTag ? "  ·  🏷️ " + p.familyTag : ""
+  }  ·  (tap to tag)`;
+  const myName = localStorage.getItem("gtc_name") || "";
+  const liked = (p.likedBy || []).includes(myName);
+  const likeCount = (p.likedBy || []).length;
+  $("#slideshowLikeBtn").textContent = liked ? `❤️ Liked${likeCount ? " (" + likeCount + ")" : ""}` : `🤍 Like`;
 }
 function nextSlide() {
   slideshowIndex = (slideshowIndex + 1) % photos.length;
@@ -914,6 +1389,22 @@ $("#slideshowPlayBtn").addEventListener("click", () => {
   } else {
     startSlideshowTimer();
   }
+});
+$("#slideshowLikeBtn").addEventListener("click", () => {
+  const p = photos[slideshowIndex];
+  if (p) togglePhotoLike(p.id);
+});
+$("#slideshowCaption").style.cursor = "pointer";
+$("#slideshowCaption").title = "Tap to tag a family or person in this photo";
+$("#slideshowCaption").addEventListener("click", () => {
+  const p = photos[slideshowIndex];
+  if (!p) return;
+  const tag = window.prompt("Tag a family or person in this photo (optional):", p.familyTag || "");
+  if (tag === null) return;
+  updateDoc(doc(db, "photos", p.id), { familyTag: tag.trim() }).catch((err) => {
+    console.error(err);
+    showToast("Couldn't update — check your connection");
+  });
 });
 document.addEventListener("keydown", (e) => {
   if ($("#slideshowOverlay").classList.contains("hidden")) return;
@@ -1154,6 +1645,141 @@ function surpriseGame() {
       },
     }
   );
+}
+
+// =============================================================================
+// WISHLIST ("Things to bring")
+// =============================================================================
+let wishlistItems = [];
+
+function initWishlist() {
+  const ref = query(collection(db, "wishlistItems"), orderBy("createdAt", "asc"));
+  onSnapshot(
+    ref,
+    (snap) => {
+      wishlistItems = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      renderWishlist();
+      renderDashboard();
+    },
+    (err) => console.error("wishlist listener:", err)
+  );
+
+  $("#wishlistForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const input = $("#wishlistInput");
+    const text = input.value.trim();
+    if (!text) return;
+    try {
+      await addDoc(collection(db, "wishlistItems"), {
+        text,
+        claimedBy: "",
+        addedBy: getMyName(),
+        createdAt: serverTimestamp(),
+      });
+      input.value = "";
+    } catch (err) {
+      console.error(err);
+      showToast("Couldn't add — check your connection");
+    }
+  });
+}
+
+function renderWishlist() {
+  const list = $("#wishlistList");
+  if (!wishlistItems.length) {
+    list.innerHTML = `<li class="muted">Nothing on the list yet.</li>`;
+    return;
+  }
+  list.innerHTML = wishlistItems
+    .map(
+      (w) => `
+    <li class="wishlist-item ${w.claimedBy ? "claimed" : ""}">
+      <span class="wishlist-item-name">${escapeHtml(w.text)}</span>
+      <span class="wishlist-item-actions">
+        <button class="claim-btn ${w.claimedBy ? "claimed-by" : ""}" data-claim="${w.id}">${
+        w.claimedBy ? "✓ " + escapeHtml(w.claimedBy) : "I'll bring it"
+      }</button>
+        <button class="icon-action" data-del="${w.id}" title="Remove">🗑️</button>
+      </span>
+    </li>`
+    )
+    .join("");
+
+  $$("[data-claim]", list).forEach((btn) => btn.addEventListener("click", () => toggleWishlistClaim(btn.dataset.claim)));
+  $$("[data-del]", list).forEach((btn) =>
+    btn.addEventListener("click", () => {
+      if (window.confirm("Remove this item?")) {
+        deleteDoc(doc(db, "wishlistItems", btn.dataset.del)).catch((err) => console.error(err));
+      }
+    })
+  );
+}
+
+function toggleWishlistClaim(id) {
+  const w = wishlistItems.find((x) => x.id === id);
+  if (!w) return;
+  const myName = getMyName();
+  if (w.claimedBy && w.claimedBy !== myName) {
+    if (!window.confirm(`This is already claimed by ${w.claimedBy}. Take it over?`)) return;
+  }
+  const newClaimed = w.claimedBy === myName ? "" : myName;
+  updateDoc(doc(db, "wishlistItems", id), { claimedBy: newClaimed }).catch((err) => {
+    console.error(err);
+    showToast("Couldn't update — check your connection");
+  });
+}
+
+// =============================================================================
+// GUESTBOOK
+// =============================================================================
+let guestbookMessages = [];
+
+function initGuestbook() {
+  const ref = query(collection(db, "guestbookMessages"), orderBy("createdAt", "asc"));
+  onSnapshot(
+    ref,
+    (snap) => {
+      guestbookMessages = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      renderGuestbook();
+      renderDashboard();
+    },
+    (err) => console.error("guestbook listener:", err)
+  );
+
+  $("#guestbookForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const input = $("#guestbookInput");
+    const text = input.value.trim();
+    if (!text) return;
+    try {
+      await addDoc(collection(db, "guestbookMessages"), {
+        text,
+        addedBy: getMyName(),
+        createdAt: serverTimestamp(),
+      });
+      input.value = "";
+    } catch (err) {
+      console.error(err);
+      showToast("Couldn't post — check your connection");
+    }
+  });
+}
+
+function renderGuestbook() {
+  const list = $("#guestbookList");
+  if (!guestbookMessages.length) {
+    list.innerHTML = `<li class="muted">No messages yet — be the first!</li>`;
+    return;
+  }
+  const items = [...guestbookMessages].reverse().slice(0, 25);
+  list.innerHTML = items
+    .map(
+      (g) => `
+    <li class="guestbook-item">
+      <span class="gb-name">${escapeHtml(g.addedBy || "Someone")}:</span> ${escapeHtml(g.text)}
+    </li>`
+    )
+    .join("");
 }
 
 // =============================================================================
