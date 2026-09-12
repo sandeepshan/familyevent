@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <title>Get-Together Central</title>
 <meta name="description" content="Plan attendees, budget, schedule, photos and games for your family get-together — together." />
-<meta name="theme-color" content="#c1440e" />
+<meta name="theme-color" content="#0f7c78" />
 <link rel="manifest" href="manifest.json" />
 <link rel="apple-touch-icon" href="icons/icon-192.png" />
 <link rel="icon" href="icons/icon-192.png" />
@@ -254,12 +254,17 @@
         <div id="categoryBreakdown" class="category-breakdown"></div>
       </div>
 
-      <div class="card" id="costSplitCard">
-        <h3>🤝 Who owes what</h3>
-        <p class="muted" style="margin-bottom:10px">Split fairly by catering headcount (adult = 1, kid 5–12 = 0.5, kid &lt;5 = free).</p>
-        <div class="cost-split-summary" id="costSplitSummary">Add attendees and expenses to calculate shares.</div>
-        <div id="costSplitList" class="cost-split-list"></div>
-      </div>
+      <details class="card collapsible-card" id="costSplitCard" open>
+        <summary class="collapsible-summary">
+          <h3>🤝 Who owes what</h3>
+          <span class="collapsible-chevron" aria-hidden="true">▾</span>
+        </summary>
+        <div class="collapsible-body">
+          <p class="muted" style="margin-bottom:10px">Split fairly by catering headcount (adult = 1, kid 5–12 = 0.5, kid &lt;5 = free).</p>
+          <div class="cost-split-summary" id="costSplitSummary">Add attendees and expenses to calculate shares.</div>
+          <div id="costSplitList" class="cost-split-list"></div>
+        </div>
+      </details>
 
       <div class="card table-card">
         <div class="table-toolbar">
@@ -274,16 +279,15 @@
               <tr>
                 <th>Item</th>
                 <th>Category</th>
-                <th>Qty</th>
-                <th>Unit price</th>
-                <th>Total</th>
-                <th>Status</th>
+                <th>Price</th>
+                <th>Assigned to</th>
+                <th>Done</th>
                 <th>Added by</th>
                 <th></th>
               </tr>
             </thead>
             <tbody id="budgetTableBody">
-              <tr class="empty-row"><td colspan="8">No expenses yet. Add plates, catering, water, decorations…</td></tr>
+              <tr class="empty-row"><td colspan="7">No expenses yet. Add plates, catering, water, decorations…</td></tr>
             </tbody>
           </table>
         </div>
