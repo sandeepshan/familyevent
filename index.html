@@ -4,11 +4,16 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <title>Get-Together Central</title>
-<meta name="description" content="Plan attendees, budget, photos and games for your family get-together — together." />
-<meta name="theme-color" content="#e05d1f" />
+<meta name="description" content="Plan attendees, budget, schedule, photos and games for your family get-together — together." />
+<meta name="theme-color" content="#c1440e" />
 <link rel="manifest" href="manifest.json" />
 <link rel="apple-touch-icon" href="icons/icon-192.png" />
 <link rel="icon" href="icons/icon-192.png" />
+
+<!-- Fonts: Baloo 2 for festive display headings, Inter for body/UI -->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;600;700;800&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
 
 <!-- JSZip for "download all photos" -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" defer></script>
@@ -30,6 +35,7 @@
 <div id="app" class="app hidden">
 
   <header class="topbar">
+    <div class="topbar-pattern" aria-hidden="true"></div>
     <div class="topbar-inner">
       <div class="brand">
         <span class="brand-emoji" aria-hidden="true">🪔</span>
@@ -45,6 +51,7 @@
       <button class="tab-btn active" data-tab="dashboard" role="tab" aria-selected="true">🏠 <span>Home</span></button>
       <button class="tab-btn" data-tab="attendees" role="tab" aria-selected="false">👨‍👩‍👧‍👦 <span>Attendees</span></button>
       <button class="tab-btn" data-tab="budget" role="tab" aria-selected="false">🧾 <span>Budget</span></button>
+      <button class="tab-btn" data-tab="schedule" role="tab" aria-selected="false">🗓️ <span>Schedule</span></button>
       <button class="tab-btn" data-tab="photos" role="tab" aria-selected="false">📸 <span>Photos</span></button>
       <button class="tab-btn" data-tab="games" role="tab" aria-selected="false">🎉 <span>Games</span></button>
     </nav>
@@ -54,12 +61,24 @@
 
     <!-- ============ DASHBOARD ============ -->
     <section id="tab-dashboard" class="tab-panel active">
-      <div class="grid stats-grid">
-        <div class="stat-card">
-          <div class="stat-label">Countdown</div>
-          <div class="stat-value" id="statCountdown">—</div>
-          <div class="stat-sub" id="statDateVenue">Set your event date &amp; venue</div>
+
+      <div class="hero-card">
+        <div class="hero-pattern" aria-hidden="true"></div>
+        <div class="hero-content">
+          <div class="hero-eyebrow">You're invited to</div>
+          <h2 class="hero-title" id="heroEventName">Family Get-Together</h2>
+          <div class="hero-meta">
+            <span id="heroDateTime">📅 Set your date in ⚙️ settings</span>
+            <span id="heroVenue">📍 Add a venue</span>
+          </div>
+          <div class="hero-countdown-row">
+            <div class="hero-countdown-num" id="heroCountdownNum">—</div>
+            <div class="hero-countdown-label" id="heroCountdownLabel">days to go</div>
+          </div>
         </div>
+      </div>
+
+      <div class="grid stats-grid">
         <div class="stat-card">
           <div class="stat-label">Total headcount</div>
           <div class="stat-value" id="statHeadcount">0</div>
@@ -74,6 +93,11 @@
           <div class="stat-label">Photos shared</div>
           <div class="stat-value" id="statPhotos">0</div>
           <div class="stat-sub">by the whole family</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Programs planned</div>
+          <div class="stat-value" id="statPrograms">0</div>
+          <div class="stat-sub">on the schedule</div>
         </div>
       </div>
 
@@ -91,14 +115,38 @@
           <div class="quick-actions">
             <button class="btn" data-quick="attendees">➕ Add a family</button>
             <button class="btn" data-quick="budget">➕ Add an expense</button>
+            <button class="btn" data-quick="schedule">🗓️ Add a program</button>
             <button class="btn" data-quick="photos">📤 Upload photos</button>
             <button class="btn" data-quick="games">🎲 Pick a game</button>
           </div>
         </div>
+
         <div class="card">
           <h3>Committee activity</h3>
           <ul id="activityFeed" class="activity-feed">
             <li class="muted">Nothing yet — start adding attendees, expenses or photos!</li>
+          </ul>
+        </div>
+
+        <div class="card">
+          <h3>🧺 Things to bring</h3>
+          <form id="wishlistForm" class="inline-form">
+            <input type="text" id="wishlistInput" class="input" placeholder="e.g. extra chairs, speaker, extension cord" />
+            <button type="submit" class="btn btn-primary">Add</button>
+          </form>
+          <ul id="wishlistList" class="wishlist-list">
+            <li class="muted">Nothing on the list yet.</li>
+          </ul>
+        </div>
+
+        <div class="card">
+          <h3>💌 Messages</h3>
+          <form id="guestbookForm" class="inline-form">
+            <input type="text" id="guestbookInput" class="input" placeholder="Leave a message for the family…" maxlength="240" />
+            <button type="submit" class="btn btn-primary">Post</button>
+          </form>
+          <ul id="guestbookList" class="guestbook-list">
+            <li class="muted">No messages yet — be the first!</li>
           </ul>
         </div>
       </div>
@@ -117,6 +165,34 @@
         <div class="stat-card"><div class="stat-label">Kids 5–12</div><div class="stat-value" id="attKids512">0</div></div>
         <div class="stat-card"><div class="stat-label">Kids under 5</div><div class="stat-value" id="attKidsU5">0</div></div>
         <div class="stat-card highlight"><div class="stat-label">Grand total</div><div class="stat-value" id="attTotal">0</div></div>
+        <div class="stat-card highlight alt">
+          <div class="stat-label">Catering headcount</div>
+          <div class="stat-value" id="attCateringHeads">0</div>
+          <div class="stat-sub">adult = 1 · kid 5–12 = 0.5 · kid &lt;5 = free</div>
+        </div>
+      </div>
+
+      <label class="toggle-row">
+        <span class="toggle-switch">
+          <input type="checkbox" id="confirmedOnlyToggle" />
+          <span class="toggle-track"><span class="toggle-thumb"></span></span>
+        </span>
+        <span>Show confirmed guests only (affects the totals above and catering cost splits)</span>
+      </label>
+
+      <div class="two-col">
+        <div class="card" id="dietaryCard">
+          <h3>🥗 Dietary &amp; allergies</h3>
+          <div id="dietaryRollup" class="dietary-rollup">
+            <p class="muted">Add attendees with dietary notes to see a summary here.</p>
+          </div>
+        </div>
+        <div class="card" id="seatingCard">
+          <h3>🪑 Seating overview</h3>
+          <div id="seatingOverview" class="seating-overview">
+            <p class="muted">Assign tables when adding attendees to see the layout here.</p>
+          </div>
+        </div>
       </div>
 
       <div class="card table-card">
@@ -133,14 +209,17 @@
                 <th>Kids 5–12</th>
                 <th>Kids &lt;5</th>
                 <th>Total</th>
+                <th title="adult = 1, kid 5–12 = 0.5, kid under 5 = free">Cat. Head</th>
+                <th>Table</th>
                 <th>RSVP</th>
+                <th>Dietary</th>
                 <th>Notes</th>
                 <th>Added by</th>
                 <th></th>
               </tr>
             </thead>
             <tbody id="attendeeTableBody">
-              <tr class="empty-row"><td colspan="9">No attendees yet. Add the first family above!</td></tr>
+              <tr class="empty-row"><td colspan="12">No attendees yet. Add the first family above!</td></tr>
             </tbody>
           </table>
         </div>
@@ -158,12 +237,26 @@
         <div class="stat-card highlight"><div class="stat-label">Total spent</div><div class="stat-value" id="budgetGrandTotal">$0</div></div>
         <div class="stat-card"><div class="stat-label">Items</div><div class="stat-value" id="budgetItemCount">0</div></div>
         <div class="stat-card"><div class="stat-label">Cost / adult</div><div class="stat-value" id="budgetPerAdult">$0</div></div>
-        <div class="stat-card"><div class="stat-label">Cost / person</div><div class="stat-value" id="budgetPerPerson">$0</div></div>
+        <div class="stat-card">
+          <div class="stat-label">Cost / catering head</div>
+          <div class="stat-value" id="budgetPerPerson">$0</div>
+          <div class="stat-sub">weighted: adult=1, kid 5–12=0.5, kid &lt;5=free</div>
+        </div>
       </div>
 
       <div class="card" id="categoryBreakdownCard">
-        <h3>By category</h3>
+        <div class="panel-head" style="margin-bottom:10px">
+          <h3 style="margin:0">By category</h3>
+          <button class="btn btn-ghost" id="setCapsBtn">🎯 Set category budgets</button>
+        </div>
         <div id="categoryBreakdown" class="category-breakdown"></div>
+      </div>
+
+      <div class="card" id="costSplitCard">
+        <h3>🤝 Who owes what</h3>
+        <p class="muted" style="margin-bottom:10px">Split fairly by catering headcount (adult = 1, kid 5–12 = 0.5, kid &lt;5 = free).</p>
+        <div class="cost-split-summary" id="costSplitSummary">Add attendees and expenses to calculate shares.</div>
+        <div id="costSplitList" class="cost-split-list"></div>
       </div>
 
       <div class="card table-card">
@@ -195,6 +288,23 @@
       </div>
     </section>
 
+    <!-- ============ SCHEDULE ============ -->
+    <section id="tab-schedule" class="tab-panel">
+      <div class="panel-head no-print">
+        <h2>Event schedule</h2>
+        <div class="panel-actions">
+          <button class="btn btn-ghost" id="printScheduleBtn">🖨️ Print</button>
+          <button class="btn btn-primary" id="addScheduleBtn">➕ Add program</button>
+        </div>
+      </div>
+
+      <div class="schedule-window" id="scheduleWindow">Set your event date, time and venue in ⚙️ settings.</div>
+
+      <div id="scheduleTimeline" class="schedule-timeline">
+        <p class="muted empty-row" id="scheduleEmptyMsg">No programs yet — add your first one (welcome, dinner, games, speeches…).</p>
+      </div>
+    </section>
+
     <!-- ============ PHOTOS ============ -->
     <section id="tab-photos" class="tab-panel">
       <div class="panel-head">
@@ -207,6 +317,11 @@
             <input type="file" id="photoInput" accept="image/*" multiple hidden />
           </label>
         </div>
+      </div>
+
+      <div class="filter-chips" id="photoFilterChips">
+        <button class="chip active" data-filter="all">All photos</button>
+        <button class="chip" data-filter="highlights">🌟 Highlights</button>
       </div>
 
       <div id="uploadProgressWrap" class="upload-progress-wrap hidden">
@@ -261,7 +376,10 @@
   <img id="slideshowImg" class="slideshow-img" alt="" />
   <button class="slideshow-nav next" id="slideshowNextBtn" aria-label="Next">›</button>
   <div class="slideshow-caption" id="slideshowCaption"></div>
-  <button class="btn btn-ghost slideshow-toggle" id="slideshowPlayBtn">⏸️ Pause</button>
+  <div class="slideshow-actions">
+    <button class="btn btn-ghost slideshow-toggle" id="slideshowLikeBtn">🤍 Like</button>
+    <button class="btn btn-ghost slideshow-toggle" id="slideshowPlayBtn">⏸️ Pause</button>
+  </div>
 </div>
 
 <div id="toast" class="toast hidden"></div>
