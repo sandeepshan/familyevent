@@ -1385,38 +1385,46 @@ function loadImageEl(dataUrl) {
   });
 }
 
-// Crops + scales a photo to exactly fill a target box (like CSS
-// object-fit: cover) and returns a JPEG data URL. We do this ourselves
-// with a canvas rather than relying on PptxGenJS's built-in "cover" sizing —
-// that auto-crop doesn't always preserve the photo's aspect ratio (it can
-// come out stretched), and capping the output resolution here also keeps
-// large phone photos from looking pixelated once PowerPoint scales them.
-async function coverCropToDataUrl(dataUrl, targetW, targetH, maxOutW = 1600) {
+// Scales a photo to fit *entirely* within a target box (like CSS
+// object-fit: contain — never cropping any of the photo) and returns a
+// JPEG data URL sized to exactly that box, with any left-over space filled
+// white so it blends into the white photo "card" behind it on the slide.
+// We do this ourselves with a canvas rather than relying on PptxGenJS's
+// built-in sizing modes — its auto-crop ("cover") chopped off the tops of
+// people's heads on wide frames, and capping the output resolution here
+// also keeps large phone photos from looking pixelated once PowerPoint
+// scales them.
+async function containFitToDataUrl(dataUrl, targetW, targetH, maxOutW = 1600) {
   const img = await loadImageEl(dataUrl);
   const targetRatio = targetW / targetH;
   const srcW = img.naturalWidth || img.width;
   const srcH = img.naturalHeight || img.height;
   const srcRatio = srcW / srcH;
-  let sx, sy, sw, sh;
-  if (srcRatio > targetRatio) {
-    sh = srcH;
-    sw = sh * targetRatio;
-    sx = (srcW - sw) / 2;
-    sy = 0;
-  } else {
-    sw = srcW;
-    sh = sw / targetRatio;
-    sx = 0;
-    sy = (srcH - sh) / 2;
-  }
-  const outW = Math.round(Math.min(maxOutW, sw));
+
+  const outW = maxOutW;
   const outH = Math.round(outW / targetRatio);
+
+  let dw, dh;
+  if (srcRatio > targetRatio) {
+    // photo is relatively wider than the frame — fit to width, letterbox top/bottom
+    dw = outW;
+    dh = Math.round(dw / srcRatio);
+  } else {
+    // photo is relatively taller than the frame — fit to height, letterbox left/right
+    dh = outH;
+    dw = Math.round(dh * srcRatio);
+  }
+  const dx = Math.round((outW - dw) / 2);
+  const dy = Math.round((outH - dh) / 2);
+
   const canvas = document.createElement("canvas");
   canvas.width = outW;
   canvas.height = outH;
   const ctx = canvas.getContext("2d");
-  ctx.drawImage(img, sx, sy, sw, sh, 0, 0, outW, outH);
-  return canvas.toDataURL("image/jpeg", 0.88);
+  ctx.fillStyle = "#FFFFFF";
+  ctx.fillRect(0, 0, outW, outH);
+  ctx.drawImage(img, 0, 0, srcW, srcH, dx, dy, dw, dh);
+  return canvas.toDataURL("image/jpeg", 0.9);
 }
 
 async function downloadPhotosPptx() {
@@ -1447,6 +1455,43 @@ async function downloadPhotosPptx() {
       slide.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: W, h: 0.35, fill: { color: MARIGOLD }, line: { type: "none" } });
       slide.addShape(pptx.ShapeType.rect, { x: 0, y: H - 0.35, w: W, h: 0.35, fill: { color: MARIGOLD }, line: { type: "none" } });
     };
+    const MALAYALAM_FONT = "Noto Sans Malayalam";
+    const PEACOCK_LIGHT = "5ECBC3";
+    const GOLD_LIGHT = "F0D78C";
+
+    // ---------- Opening slide: a word cloud of our group names ----------
+    const groupCloud = pptx.addSlide();
+    fullBleed(groupCloud, MAROON_DEEP);
+    accentBars(groupCloud);
+    // A few soft decorative dots for texture, echoing the app's own background pattern.
+    [
+      { x: 0.7, y: 0.7, r: 0.05 }, { x: 9.1, y: 0.65, r: 0.04 }, { x: 0.5, y: 4.85, r: 0.04 },
+      { x: 9.3, y: 4.9, r: 0.05 }, { x: 5.0, y: 0.55, r: 0.035 },
+    ].forEach((d) =>
+      groupCloud.addShape(pptx.ShapeType.ellipse, { x: d.x, y: d.y, w: d.r, h: d.r, fill: { color: GOLD, transparency: 55 }, line: { type: "none" } })
+    );
+    groupCloud.addText("🪔  OUR GROUPS  🪔", {
+      x: 0, y: 0.55, w: W, h: 0.5, align: "center", fontSize: 15, bold: true, color: GOLD, charSpacing: 2,
+    });
+    // Hand-placed "word cloud" of the family's group names, in Malayalam —
+    // varying sizes, colors and gentle rotations for an organic, festive feel.
+    const cloudWords = [
+      { text: "ശ്രീ മാരുതി സൈക്ലിംഗ് ക്ലബ്", x: 0.4, y: 1.15, w: 9.2, h: 0.9, fontSize: 30, color: GOLD, rotate: 0 },
+      { text: "ടാർണീറ്റ് ബോയ്സ്", x: 0.15, y: 2.15, w: 4.3, h: 0.75, fontSize: 25, color: "FFFFFF", rotate: -7 },
+      { text: "ജിം ബോയ്സ്", x: 6.9, y: 2.05, w: 2.9, h: 0.75, fontSize: 26, color: PEACOCK_LIGHT, rotate: 6 },
+      { text: "വിൻഡാം ക്യാമ്പേഴ്സ്", x: 0.75, y: 3.15, w: 4.0, h: 0.75, fontSize: 24, color: GOLD_LIGHT, rotate: 5 },
+      { text: "വിൻഡാം ഫിഷിംഗ്", x: 5.5, y: 3.2, w: 3.7, h: 0.75, fontSize: 24, color: CREAM, rotate: -6 },
+      { text: "ടാർണീറ്റ് ബൈക്കീസ്", x: 2.6, y: 4.15, w: 4.6, h: 0.7, fontSize: 25, color: "FFFFFF", rotate: 3 },
+    ];
+    cloudWords.forEach((w) =>
+      groupCloud.addText(w.text, {
+        x: w.x, y: w.y, w: w.w, h: w.h, align: "center", valign: "middle",
+        fontSize: w.fontSize, bold: true, color: w.color, fontFace: MALAYALAM_FONT, rotate: w.rotate,
+      })
+    );
+    groupCloud.addText(eventInfo.eventName || "Family Get-Together", {
+      x: 0.5, y: H - 0.65, w: W - 1, h: 0.3, align: "center", fontSize: 10, italic: true, color: "FFE7C2",
+    });
 
     // ---------- Title slide ----------
     const title = pptx.addSlide();
@@ -1479,7 +1524,7 @@ async function downloadPhotosPptx() {
       let b64;
       try {
         const raw = await imageUrlToBase64(p.downloadURL);
-        b64 = await coverCropToDataUrl(raw, W - 1.5, 3.75);
+        b64 = await containFitToDataUrl(raw, W - 1.5, 4.15);
       } catch (e) {
         console.error("skipping photo in pptx export:", e);
         failCount++;
@@ -1489,30 +1534,20 @@ async function downloadPhotosPptx() {
       fullBleed(slide, i % 2 === 0 ? CREAM_DEEP : CREAM);
       // Frame "card" behind the photo for a polaroid-ish, designed look.
       slide.addShape(pptx.ShapeType.rect, {
-        x: 0.55, y: 0.45, w: W - 1.1, h: 4.5,
+        x: 0.55, y: 0.4, w: W - 1.1, h: 4.6,
         fill: { color: "FFFFFF" },
         line: { color: GOLD, width: 1.5 },
         shadow: { type: "outer", color: "000000", opacity: 0.3, blur: 6, offset: 2, angle: 90 },
       });
-      // b64 is already pre-cropped to exactly this box's aspect ratio, so no
-      // "sizing" is needed here — that avoids PptxGenJS's own auto-crop, which
-      // doesn't always preserve aspect ratio faithfully.
-      slide.addImage({ data: b64, x: 0.75, y: 0.65, w: W - 1.5, h: 3.75 });
+      // b64 is already scaled to fit within this exact box (letterboxed in
+      // white, never cropped), so no "sizing" is needed here — that avoids
+      // PptxGenJS's own auto-crop, which was chopping off parts of photos.
+      slide.addImage({ data: b64, x: 0.75, y: 0.6, w: W - 1.5, h: 4.15 });
       const likeCount = (p.likedBy || []).length;
       if (likeCount > 0) {
-        slide.addShape(pptx.ShapeType.roundRect, { x: W - 1.85, y: 0.55, w: 1.1, h: 0.38, fill: { color: MARIGOLD }, line: { type: "none" }, rectRadius: 0.1 });
-        slide.addText("🌟 Highlight", { x: W - 1.85, y: 0.55, w: 1.1, h: 0.38, align: "center", valign: "middle", fontSize: 9, bold: true, color: "FFFFFF" });
+        slide.addShape(pptx.ShapeType.roundRect, { x: W - 1.85, y: 0.5, w: 1.1, h: 0.38, fill: { color: MARIGOLD }, line: { type: "none" }, rectRadius: 0.1 });
+        slide.addText("🌟 Highlight", { x: W - 1.85, y: 0.5, w: 1.1, h: 0.38, align: "center", valign: "middle", fontSize: 9, bold: true, color: "FFFFFF" });
       }
-      // Uploader name intentionally left off the exported deck's caption —
-      // just the family tag and like count, so it reads like a photo album
-      // rather than an attribution log.
-      const captionParts = [];
-      if (p.familyTag) captionParts.push(`🏷️ ${p.familyTag}`);
-      if (likeCount) captionParts.push(`❤️ ${likeCount}`);
-      slide.addShape(pptx.ShapeType.rect, { x: 0.75, y: 4.4, w: W - 1.5, h: 0.5, fill: { color: MARIGOLD }, line: { type: "none" } });
-      slide.addText(captionParts.join("     ") || "📸 A moment from the celebration", {
-        x: 0.85, y: 4.4, w: W - 1.7, h: 0.5, align: "center", valign: "middle", fontSize: 12, bold: true, color: "FFFFFF",
-      });
       slide.addText(`${eventInfo.eventName || "Family Get-Together"}   ·   ${i}/${ordered.length}`, {
         x: 0.3, y: H - 0.32, w: W - 0.6, h: 0.28, align: "left", fontSize: 8, color: INK,
       });
