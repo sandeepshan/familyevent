@@ -1376,6 +1376,49 @@ async function imageUrlToBase64(url) {
   });
 }
 
+function loadImageEl(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("Couldn't decode image"));
+    img.src = dataUrl;
+  });
+}
+
+// Crops + scales a photo to exactly fill a target box (like CSS
+// object-fit: cover) and returns a JPEG data URL. We do this ourselves
+// with a canvas rather than relying on PptxGenJS's built-in "cover" sizing —
+// that auto-crop doesn't always preserve the photo's aspect ratio (it can
+// come out stretched), and capping the output resolution here also keeps
+// large phone photos from looking pixelated once PowerPoint scales them.
+async function coverCropToDataUrl(dataUrl, targetW, targetH, maxOutW = 1600) {
+  const img = await loadImageEl(dataUrl);
+  const targetRatio = targetW / targetH;
+  const srcW = img.naturalWidth || img.width;
+  const srcH = img.naturalHeight || img.height;
+  const srcRatio = srcW / srcH;
+  let sx, sy, sw, sh;
+  if (srcRatio > targetRatio) {
+    sh = srcH;
+    sw = sh * targetRatio;
+    sx = (srcW - sw) / 2;
+    sy = 0;
+  } else {
+    sw = srcW;
+    sh = sw / targetRatio;
+    sx = 0;
+    sy = (srcH - sh) / 2;
+  }
+  const outW = Math.round(Math.min(maxOutW, sw));
+  const outH = Math.round(outW / targetRatio);
+  const canvas = document.createElement("canvas");
+  canvas.width = outW;
+  canvas.height = outH;
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(img, sx, sy, sw, sh, 0, 0, outW, outH);
+  return canvas.toDataURL("image/jpeg", 0.88);
+}
+
 async function downloadPhotosPptx() {
   if (!photos.length) return showToast("No photos to export yet");
   if (typeof PptxGenJS === "undefined") return showToast("Still loading — try again in a moment");
@@ -1435,7 +1478,8 @@ async function downloadPhotosPptx() {
       i++;
       let b64;
       try {
-        b64 = await imageUrlToBase64(p.downloadURL);
+        const raw = await imageUrlToBase64(p.downloadURL);
+        b64 = await coverCropToDataUrl(raw, W - 1.5, 3.75);
       } catch (e) {
         console.error("skipping photo in pptx export:", e);
         failCount++;
@@ -1450,18 +1494,19 @@ async function downloadPhotosPptx() {
         line: { color: GOLD, width: 1.5 },
         shadow: { type: "outer", color: "000000", opacity: 0.3, blur: 6, offset: 2, angle: 90 },
       });
-      slide.addImage({
-        data: b64,
-        x: 0.75, y: 0.65, w: W - 1.5, h: 3.75,
-        sizing: { type: "cover", w: W - 1.5, h: 3.75 },
-      });
+      // b64 is already pre-cropped to exactly this box's aspect ratio, so no
+      // "sizing" is needed here — that avoids PptxGenJS's own auto-crop, which
+      // doesn't always preserve aspect ratio faithfully.
+      slide.addImage({ data: b64, x: 0.75, y: 0.65, w: W - 1.5, h: 3.75 });
       const likeCount = (p.likedBy || []).length;
       if (likeCount > 0) {
         slide.addShape(pptx.ShapeType.roundRect, { x: W - 1.85, y: 0.55, w: 1.1, h: 0.38, fill: { color: MARIGOLD }, line: { type: "none" }, rectRadius: 0.1 });
         slide.addText("🌟 Highlight", { x: W - 1.85, y: 0.55, w: 1.1, h: 0.38, align: "center", valign: "middle", fontSize: 9, bold: true, color: "FFFFFF" });
       }
+      // Uploader name intentionally left off the exported deck's caption —
+      // just the family tag and like count, so it reads like a photo album
+      // rather than an attribution log.
       const captionParts = [];
-      if (p.uploadedBy) captionParts.push(`📤 ${p.uploadedBy}`);
       if (p.familyTag) captionParts.push(`🏷️ ${p.familyTag}`);
       if (likeCount) captionParts.push(`❤️ ${likeCount}`);
       slide.addShape(pptx.ShapeType.rect, { x: 0.75, y: 4.4, w: W - 1.5, h: 0.5, fill: { color: MARIGOLD }, line: { type: "none" } });
