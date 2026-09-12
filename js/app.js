@@ -110,6 +110,8 @@ async function boot() {
   initGames();
   initWishlist();
   initGuestbook();
+  initCrewRoles();
+  initCommunications();
   registerServiceWorker();
 }
 
@@ -164,6 +166,8 @@ function initSettings() {
       renderDashboard();
       renderBudget();
       renderSchedule();
+      maybeFetchWeather();
+      refreshShareLinks();
     },
     (err) => console.error("settings listener:", err)
   );
@@ -274,6 +278,73 @@ function fmtTime12(t) {
 function eventTimeRangeLabel() {
   if (!eventInfo.eventStartTime) return "";
   return `${fmtTime12(eventInfo.eventStartTime)}${eventInfo.eventEndTime ? " – " + fmtTime12(eventInfo.eventEndTime) : ""}`;
+}
+
+// -----------------------------------------------------------------------------
+// Weather widget (Open-Meteo — free, no API key). Best-effort: any failure
+// (offline, venue not found, event too far out for a forecast) just keeps
+// the card hidden rather than showing an error.
+// -----------------------------------------------------------------------------
+function weatherCodeToEmoji(code) {
+  if (code === 0) return "☀️";
+  if ([1, 2, 3].includes(code)) return "⛅";
+  if ([45, 48].includes(code)) return "🌫️";
+  if ([51, 53, 55, 56, 57, 61, 63, 65, 66, 67].includes(code)) return "🌧️";
+  if ([71, 73, 75, 77, 85, 86].includes(code)) return "❄️";
+  if ([80, 81, 82].includes(code)) return "🌦️";
+  if ([95, 96, 99].includes(code)) return "⛈️";
+  return "🌡️";
+}
+
+let lastWeatherKey = "";
+async function maybeFetchWeather() {
+  const venue = (eventInfo.venue || "").trim();
+  const key = `${venue}|${eventInfo.eventDate || ""}`;
+  if (!venue || !eventInfo.eventDate) {
+    $("#weatherCard").hidden = true;
+    return;
+  }
+  if (key === lastWeatherKey) return;
+  lastWeatherKey = key;
+  try {
+    const daysOut = Math.round((new Date(eventInfo.eventDate + "T00:00:00") - new Date(new Date().toDateString())) / 86400000);
+    if (daysOut < 0 || daysOut > 15) {
+      $("#weatherCard").hidden = true;
+      return; // outside Open-Meteo's ~16-day forecast window
+    }
+    const geoRes = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(venue.split(",")[0])}&count=1`);
+    const geo = await geoRes.json();
+    const place = geo?.results?.[0];
+    if (!place) {
+      $("#weatherCard").hidden = true;
+      return;
+    }
+    const fRes = await fetch(
+      `https://api.open-meteo.com/v1/forecast?latitude=${place.latitude}&longitude=${place.longitude}&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weathercode&timezone=auto&start_date=${eventInfo.eventDate}&end_date=${eventInfo.eventDate}`
+    );
+    const data = await fRes.json();
+    if (!data?.daily?.time?.length) {
+      $("#weatherCard").hidden = true;
+      return;
+    }
+    const max = Math.round(data.daily.temperature_2m_max[0]);
+    const min = Math.round(data.daily.temperature_2m_min[0]);
+    const rain = data.daily.precipitation_probability_max[0];
+    const icon = weatherCodeToEmoji(data.daily.weathercode[0]);
+    $("#weatherContent").innerHTML = `
+      <div class="weather-row">
+        <span class="weather-icon">${icon}</span>
+        <span class="weather-temp">${min}° – ${max}°</span>
+        <span class="weather-rain">☔ ${rain}% chance of rain</span>
+      </div>
+      <p class="muted" style="margin-top:6px;font-size:0.78rem">For ${escapeHtml(place.name)} — forecasts firm up closer to the day, so check back.</p>`;
+    $("#weatherCard").hidden = false;
+  } catch (err) {
+    // Non-critical: offline, blocked network, or Open-Meteo hiccup — just
+    // keep the forecast card hidden rather than surfacing an error.
+    console.warn("weather forecast unavailable:", err && err.message);
+    $("#weatherCard").hidden = true;
+  }
 }
 
 function renderHero() {
@@ -448,7 +519,7 @@ function renderAttendees() {
 
   const body = $("#attendeeTableBody");
   if (!filtered.length) {
-    body.innerHTML = `<tr class="empty-row"><td colspan="10">${searchTerm ? "No matches." : "No attendees yet. Add the first family above!"}</td></tr>`;
+    body.innerHTML = `<tr class="empty-row"><td colspan="13">${searchTerm ? "No matches." : "No attendees yet. Add the first family above!"}</td></tr>`;
     return;
   }
   const rsvpBadge = (r) => {
@@ -461,6 +532,7 @@ function renderAttendees() {
       const total = (Number(a.adults) || 0) + (Number(a.kids512) || 0) + (Number(a.kidsU5) || 0);
       return `<tr>
         <td><strong>${escapeHtml(a.familyName)}</strong></td>
+        <td class="muted">${a.phone ? `<a href="tel:${escapeHtml(a.phone)}">${escapeHtml(a.phone)}</a>` : ""}</td>
         <td>${a.adults || 0}</td>
         <td>${a.kids512 || 0}</td>
         <td>${a.kidsU5 || 0}</td>
@@ -472,6 +544,7 @@ function renderAttendees() {
         <td class="muted">${escapeHtml(a.notes || "")}</td>
         <td class="muted">${escapeHtml(a.addedBy || "")}</td>
         <td class="row-actions">
+          ${a.phone ? `<a class="icon-action" href="${attendeeWhatsappHref(a)}" target="_blank" rel="noopener" title="WhatsApp reminder">💬</a>` : ""}
           <button class="icon-action" data-edit="${a.id}" title="Edit">✏️</button>
           <button class="icon-action" data-del="${a.id}" title="Delete">🗑️</button>
         </td>
@@ -560,6 +633,8 @@ function openAttendeeModal(existing) {
     <h3>${isEdit ? "✏️ Edit" : "➕ Add"} family / person</h3>
     <label class="field-label">Family or person name</label>
     <input class="input" id="fAttName" value="${escapeHtml(existing?.familyName || "")}" placeholder="e.g. The Sharmas" />
+    <label class="field-label">Phone number (optional)</label>
+    <input class="input" id="fAttPhone" type="tel" value="${escapeHtml(existing?.phone || "")}" placeholder="e.g. +61 412 345 678" />
     <div class="field-row">
       <div><label class="field-label">Adults</label><input class="input" id="fAttAdults" type="number" min="0" value="${existing?.adults ?? 1}" /></div>
       <div><label class="field-label">Kids 5–12</label><input class="input" id="fAttKids512" type="number" min="0" value="${existing?.kids512 ?? 0}" /></div>
@@ -592,6 +667,7 @@ function openAttendeeModal(existing) {
           if (!familyName) return showToast("Please enter a name");
           const data = {
             familyName,
+            phone: $("#fAttPhone", root).value.trim(),
             adults: parseInt($("#fAttAdults", root).value, 10) || 0,
             kids512: parseInt($("#fAttKids512", root).value, 10) || 0,
             kidsU5: parseInt($("#fAttKidsU5", root).value, 10) || 0,
@@ -632,10 +708,11 @@ function confirmDeleteAttendee(id) {
 }
 
 function exportAttendeesCsv() {
-  const rows = [["Family/Person", "Adults", "Kids 5-12", "Kids under 5", "Total", "Catering Head", "Table", "RSVP", "Dietary", "Notes", "Added by"]];
+  const rows = [["Family/Person", "Phone", "Adults", "Kids 5-12", "Kids under 5", "Total", "Catering Head", "Table", "RSVP", "Dietary", "Notes", "Added by"]];
   attendees.forEach((a) => {
     rows.push([
       a.familyName,
+      a.phone || "",
       a.adults || 0,
       a.kids512 || 0,
       a.kidsU5 || 0,
@@ -1146,6 +1223,7 @@ function confirmDeleteSchedule(id) {
 // PHOTOS
 // =============================================================================
 let photos = [];
+let photoWallOpen = false;
 
 function initPhotos() {
   const ref = query(collection(db, "photos"), orderBy("createdAt", "asc"));
@@ -1156,6 +1234,7 @@ function initPhotos() {
       renderPhotos();
       renderDashboard();
       if (!$("#slideshowOverlay").classList.contains("hidden")) renderSlide();
+      if (photoWallOpen) renderPhotoWall();
     },
     (err) => {
       console.error("photos listener:", err);
@@ -1167,6 +1246,8 @@ function initPhotos() {
   $("#slideshowBtn").addEventListener("click", () => openSlideshow(0));
   $("#downloadAllBtn").addEventListener("click", downloadAllPhotosZip);
   $("#downloadPptxBtn").addEventListener("click", downloadPhotosPptx);
+  $("#photoWallBtn").addEventListener("click", openPhotoWall);
+  $("#wallCloseBtn").addEventListener("click", closePhotoWall);
   $$("#photoFilterChips .chip").forEach((chip) => {
     chip.addEventListener("click", () => {
       $$("#photoFilterChips .chip").forEach((c) => c.classList.remove("active"));
@@ -1174,6 +1255,50 @@ function initPhotos() {
       renderPhotos();
     });
   });
+}
+
+// ---- Photo Wall (fullscreen TV display mode) ----
+function openPhotoWall() {
+  photoWallOpen = true;
+  $("#photoWallOverlay").classList.remove("hidden");
+  try {
+    document.documentElement.requestFullscreen?.().catch(() => {});
+  } catch (e) {
+    /* fullscreen unsupported/blocked — the overlay still fills the viewport */
+  }
+  renderPhotoWall();
+}
+
+function closePhotoWall() {
+  photoWallOpen = false;
+  $("#photoWallOverlay").classList.add("hidden");
+  try {
+    if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+  } catch (e) {
+    /* ignore */
+  }
+}
+
+function renderPhotoWall() {
+  $("#wallEventName").textContent = eventInfo.eventName || "Family Get-Together";
+  $("#wallPhotoCount").textContent = `${photos.length} photo${photos.length === 1 ? "" : "s"}`;
+  const grid = $("#wallGrid");
+  if (!photos.length) {
+    grid.innerHTML = `<p class="muted empty-row">No photos yet — upload some from any phone to see them appear here live!</p>`;
+    return;
+  }
+  // Show newest first so a freshly-uploaded photo appears at the top of the wall.
+  const list = photos.slice().reverse();
+  grid.innerHTML = list
+    .map((p) => {
+      const highlighted = (p.likedBy || []).length > 0;
+      return `
+    <div class="wall-tile${highlighted ? " wall-tile-highlight" : ""}">
+      <img src="${p.downloadURL}" alt="${escapeHtml(p.caption || "Event photo")}" loading="lazy" />
+      ${p.familyTag ? `<span class="wall-tile-tag">🏷️ ${escapeHtml(p.familyTag)}</span>` : ""}
+    </div>`;
+    })
+    .join("");
 }
 
 function activePhotoFilter() {
@@ -1723,7 +1848,7 @@ document.addEventListener("keydown", (e) => {
 // =============================================================================
 const SEED_GAMES = [
   { name: "Antakshari (Bollywood Edition)", category: "Dance/Music", ageGroup: "All ages", groupSize: "2 teams", duration: "20–40 min", props: "None — just enthusiasm!", desc: "Classic song-chain game — keep the music going using the last letter of the previous song." },
-  { name: "Dumb Charades (Bollywood Movies)", category: "Indoor/Table", ageGroup: "All ages", groupSize: "6+", duration: "30 min", props: "Chits with movie names", desc: "Act out movie titles without speaking while your team guesses." },
+  { name: "Dumb Charades (Malayalam Movies)", category: "Indoor/Table", ageGroup: "All ages", groupSize: "6+", duration: "30 min", props: "Chits with movie names", desc: "Act out Malayalam movie titles without speaking while your team guesses." },
   { name: "Tambola / Housie", category: "Indoor/Table", ageGroup: "All ages", groupSize: "8+", duration: "30–45 min", props: "Tambola tickets, numbered balls or an app, small prizes", desc: "Everyone's favourite bingo-style game — great for mixing kids, parents and grandparents." },
   { name: "Musical Chairs", category: "Active/Outdoor", ageGroup: "Kids & adults", groupSize: "6+", duration: "15–20 min", props: "Chairs, music", desc: "One fewer chair than players — classic elimination fun." },
   { name: "Passing the Parcel", category: "Icebreaker", ageGroup: "Kids", groupSize: "8+", duration: "15 min", props: "Wrapped parcel with layers, music", desc: "Add a fun forfeit or mini-prize in every layer for extra excitement." },
@@ -1734,11 +1859,12 @@ const SEED_GAMES = [
   { name: "Treasure Hunt", category: "Icebreaker", ageGroup: "All ages", groupSize: "Any", duration: "30–60 min", props: "Clue cards, small prizes", desc: "Hide clues around the venue leading to a final treasure — great for mixed-age teams." },
   { name: "Family Quiz Night", category: "Indoor/Table", ageGroup: "All ages", groupSize: "Teams of 4–6", duration: "30 min", props: "Quiz questions, a bell or buzzer", desc: "Mix Bollywood, cricket, general knowledge and family in-jokes." },
   { name: "\"Mr & Mrs\" Couple Quiz", category: "Indoor/Table", ageGroup: "Adults", groupSize: "Couples", duration: "20–30 min", props: "Prepared questions about each couple", desc: "How well do couples really know each other? A guaranteed laugh riot." },
-  { name: "Rangoli Competition", category: "Cultural", ageGroup: "All ages", groupSize: "Teams or individuals", duration: "30–45 min", props: "Rangoli colours/petals, chalk", desc: "Friendly competition to design the best rangoli — let the kids judge!" },
+  { name: "Pookalam Making Contest (Onam Flower Rangoli)", category: "Cultural", ageGroup: "All ages", groupSize: "Teams or individuals", duration: "30–45 min", props: "Flower petals (or rangoli colours as a substitute)", desc: "Kerala's classic Onam flower carpet — friendly competition to design the best pookalam." },
   { name: "Mehendi Corner", category: "Cultural", ageGroup: "All ages", groupSize: "Walk-in", duration: "Ongoing", props: "Henna cones", desc: "Set up a casual mehendi station for anyone who wants a design." },
-  { name: "Dandiya / Garba Session", category: "Dance/Music", ageGroup: "All ages", groupSize: "Any", duration: "30–45 min", props: "Dandiya sticks, a playlist", desc: "A high-energy dance session — perfect if the season fits!" },
-  { name: "Bollywood Dance-Off / Karaoke", category: "Dance/Music", ageGroup: "All ages", groupSize: "Any", duration: "30–60 min", props: "Speaker, playlist or karaoke app", desc: "Open floor for anyone to perform — kids often steal the show." },
+  { name: "Thiruvathira / Kaikottikali (Kerala Circle Dance)", category: "Dance/Music", ageGroup: "All ages", groupSize: "Any", duration: "20–30 min", props: "A Thiruvathira/Malayalam folk playlist, open floor space", desc: "The classic Kerala circle dance — graceful claps and steps to a folk song, everyone welcome." },
+  { name: "Uriyadi (Pot-Breaking Game)", category: "Active/Outdoor", ageGroup: "All ages", groupSize: "Any", duration: "20–30 min", props: "A pot with a treat inside, rope, a stick, a blindfold", desc: "A classic Onam favourite — blindfolded players are guided by shouted directions to break the hanging pot." },
   { name: "Fancy Dress / Best Dressed Kids", category: "Kids", ageGroup: "Kids", groupSize: "Any", duration: "20 min", props: "Costumes (bring from home)", desc: "A cute mini ramp-walk — pick a theme in advance." },
+  { name: "Kasavu & Mundu Walk (Traditional Attire Ramp Walk)", category: "Cultural", ageGroup: "All ages", groupSize: "Any", duration: "20 min", props: "Kasavu sarees, mundu/veshti, traditional jewellery (bring from home)", desc: "A fun mini ramp-walk in traditional Kerala attire — grandparents often steal the show." },
   { name: "Drawing & Colouring Corner", category: "Kids", ageGroup: "Kids", groupSize: "Any", duration: "Ongoing", props: "Paper, crayons or colours", desc: "A quiet corner to keep younger kids happily occupied." },
   { name: "Simplified Housie for Kids", category: "Kids", ageGroup: "Kids", groupSize: "6+", duration: "15 min", props: "Simple number cards", desc: "An easier version of tambola sized for the younger ones." },
   { name: "Card Games Corner (Rummy / UNO)", category: "Indoor/Table", ageGroup: "Adults", groupSize: "4–6 per table", duration: "Ongoing", props: "Card decks", desc: "A relaxed table for anyone who'd rather sit, chat and play." },
@@ -1767,10 +1893,10 @@ const GAME_SCRIPTS = {
       "Mix old classics and recent hits so every generation can join in.",
     ],
   },
-  "Dumb Charades (Bollywood Movies)": {
-    materials: ["15–20 movie names written on folded chits", "A bowl or bag to hold the chits", "A timer"],
+  "Dumb Charades (Malayalam Movies)": {
+    materials: ["15–20 Malayalam movie names written on folded chits", "A bowl or bag to hold the chits", "A timer"],
     steps: [
-      "Write Bollywood movie titles on small chits, fold them, and place them in a bowl.",
+      "Write Malayalam movie titles on small chits, fold them, and place them in a bowl.",
       "Split into 2 teams. One player from Team A picks a chit and silently acts it out for their team (60–90 seconds).",
       "Teammates shout guesses — a correct guess within the time limit scores a point.",
       "Alternate turns between teams until all chits are used.",
@@ -1778,7 +1904,7 @@ const GAME_SCRIPTS = {
     ],
     tips: [
       "Agree on standard charade signals first (number of words, \"sounds like\", syllable count) so beginners aren't lost.",
-      "Mix old classics with recent hits so all ages can play.",
+      "Mix old classics (Mohanlal, Mammootty-era favourites) with recent hits so all ages can play.",
     ],
   },
   "Tambola / Housie": {
@@ -1889,7 +2015,7 @@ const GAME_SCRIPTS = {
     questions: [
       { q: "Which 1995 romantic film starring Shah Rukh Khan and Kajol became the longest continuously-running film in Indian cinema history?", a: "Dilwale Dulhania Le Jayenge (DDLJ)" },
       { q: "Which music composer, famous for \"Jai Ho\" and an Oscar win for Slumdog Millionaire, is nicknamed the \"Mozart of Madras\"?", a: "A. R. Rahman" },
-      { q: "In the classic film \"Sholay\" (1975), who played the iconic villain Gabbar Singh?", a: "Amjad Khan" },
+      { q: "Which veteran Malayalam actor, fondly called \"Lalettan\", has starred in over 350 films?", a: "Mohanlal" },
       { q: "Which actor is known as the \"King of Bollywood\", starring in classics like DDLJ, Kuch Kuch Hota Hai and Chennai Express?", a: "Shah Rukh Khan" },
       { q: "Amitabh Bachchan hosts which long-running Indian TV game show — the Hindi version of \"Who Wants to Be a Millionaire?\"", a: "Kaun Banega Crorepati (KBC)" },
       { q: "Who was known as the \"Nightingale of India\" and sang thousands of playback songs across seven decades?", a: "Lata Mangeshkar" },
@@ -1898,7 +2024,7 @@ const GAME_SCRIPTS = {
       { q: "How many players from each team are on the field during a cricket match?", a: "11" },
       { q: "What's it called when a bowler takes three wickets on three consecutive deliveries?", a: "A hat-trick" },
       { q: "What is the capital city of India?", a: "New Delhi" },
-      { q: "Diwali, the festival of lights, celebrates the return of which deity from exile, according to the Ramayana?", a: "Lord Rama" },
+      { q: "Which harvest festival is Kerala's biggest celebration of the year, famous for its grand sadhya feast and flower carpet (pookalam)?", a: "Onam" },
       { q: "Which river, flowing through cities like Varanasi, is considered the most sacred in Hinduism?", a: "The Ganges (Ganga)" },
       { q: "What are the three main colours of the Indian flag, from top to bottom?", a: "Saffron, white, and green" },
       { q: "Holi, the festival of colours, is typically celebrated in which season?", a: "Spring (around March)" },
@@ -1935,15 +2061,18 @@ const GAME_SCRIPTS = {
       { q: "What's the most romantic thing your partner has ever done for you?", a: "(Compare answers)" },
     ],
   },
-  "Rangoli Competition": {
-    materials: ["Rangoli colours/powder or flower petals", "Chalk", "A flat outdoor or indoor space"],
+  "Pookalam Making Contest (Onam Flower Rangoli)": {
+    materials: ["An assortment of flower petals (or rangoli colours/powder as a substitute)", "A flat outdoor or indoor space", "Reference pookalam designs (optional)"],
     steps: [
-      "Mark out equal-sized spaces for each team or individual.",
-      "Set a time limit (30–45 min) and an optional theme (e.g. \"welcome\", \"harvest\", \"peacock\").",
-      "Teams design and fill their rangoli within the space and time given.",
-      "Kids (or a neutral judge) vote for their favourite at the end.",
+      "Mark out equal-sized circular spaces for each team or family.",
+      "Set a time limit (30–45 min) and let teams arrange flower petals into a circular, layered pookalam design.",
+      "Suggest a theme if you like — traditional Onam motifs, a family crest, or a welcome message.",
+      "Everyone (or a neutral judge) votes for their favourite at the end.",
     ],
-    tips: ["Have a few reference designs on hand for beginners.", "Lay a plastic sheet underneath for easy cleanup."],
+    tips: [
+      "Buying loose flower petals in bulk from a florist is far easier than picking your own.",
+      "Lay a mat or sheet underneath for easy cleanup afterward.",
+    ],
   },
   "Mehendi Corner": {
     materials: ["Henna cones", "Tissues", "Reference design pictures"],
@@ -1954,24 +2083,31 @@ const GAME_SCRIPTS = {
     ],
     tips: ["Offer a quick 2-minute \"mini\" design option to keep the queue moving during a busy event."],
   },
-  "Dandiya / Garba Session": {
-    materials: ["Dandiya sticks (2 per person)", "A Dandiya/Garba playlist", "Open floor space"],
+  "Thiruvathira / Kaikottikali (Kerala Circle Dance)": {
+    materials: ["A Thiruvathira/Malayalam folk song playlist (or live singing)", "Open floor space", "Traditional attire optional (settu-mundu / kasavu)"],
     steps: [
-      "Clear a circle of open space.",
-      "Everyone forms a circle (or concentric circles) holding dandiya sticks.",
-      "Follow the basic step pattern, tapping sticks with your neighbours in rhythm with the music.",
-      "Rotate the circle direction periodically so everyone dances with different people.",
+      "Form a circle, everyone facing inward — a small lamp or floral centrepiece in the middle adds a nice traditional touch.",
+      "Follow the basic Thiruvathira step: gentle claps paired with graceful steps moving in and out of the circle, in time with the song.",
+      "Have someone experienced lead a short demo of the clap-and-step pattern first — everyone else follows along.",
+      "Tighten and widen the circle as the song builds, finishing together on the final beat.",
     ],
-    tips: ["A short 2-minute demo from anyone who knows the steps at the start helps everyone join in confidently."],
+    tips: [
+      "Traditionally danced by the women of the family, but a mixed, whole-family version is just as fun.",
+      "Start with a slower folk track for beginners — save the faster songs for once everyone's confident.",
+    ],
   },
-  "Bollywood Dance-Off / Karaoke": {
-    materials: ["Speaker", "Playlist or karaoke app / mic"],
+  "Uriyadi (Pot-Breaking Game)": {
+    materials: ["A clay or plastic pot with a treat inside (sweets, water, or a small prize)", "Rope to hang it", "A stick", "A blindfold"],
     steps: [
-      "Open the floor and invite anyone to perform — solo, family group, or impromptu.",
-      "Play their chosen song (or karaoke track) while they dance or sing.",
-      "Let the crowd decide favourites with cheers and applause.",
+      "Hang the pot at head height from a tree branch, frame, or rope strung between two points.",
+      "Blindfold one player at a time and spin them around gently to disorient them a little.",
+      "Guide them toward the pot using only shouted directions from the crowd (\"left! forward! a bit more!\") — no touching allowed.",
+      "Give each player a few swings with the stick to try to break the pot; whoever cracks it open wins whatever's inside (and the mess)!",
     ],
-    tips: ["Prime the pump by asking a couple of confident performers — especially the kids — to go first."],
+    tips: [
+      "Keep the pot light and clear the area of anything breakable nearby.",
+      "A classic Onam favourite — just as fun for adults as it is for kids.",
+    ],
   },
   "Fancy Dress / Best Dressed Kids": {
     materials: ["Costumes (brought from home)", "A runway or open space", "Music (optional)"],
@@ -1982,6 +2118,19 @@ const GAME_SCRIPTS = {
       "Everyone gets a small prize or certificate for taking part.",
     ],
     tips: ["Give every child a category to \"win\" (most colourful, best smile, etc.) so nobody feels left out."],
+  },
+  "Kasavu & Mundu Walk (Traditional Attire Ramp Walk)": {
+    materials: ["Traditional attire — kasavu sarees, mundu/veshti, jewellery (brought from home)", "A runway or open space", "Music (optional — a Malayalam instrumental works well)"],
+    steps: [
+      "Announce it in advance so everyone can bring or wear their kasavu saree, mundu, or other traditional outfit.",
+      "Line participants up and let each walk the \"ramp\" one at a time.",
+      "The crowd cheers on favourites — award fun categories (best kasavu, sharpest mundu, best jewellery) rather than one single winner.",
+      "Take plenty of photos — this one's a highlight for the photo wall!",
+    ],
+    tips: [
+      "Open it up to all ages, not just kids — grandparents in traditional attire are often the highlight.",
+      "Pair it with the photo upload feature so every outfit gets captured.",
+    ],
   },
   "Drawing & Colouring Corner": {
     materials: ["Paper", "Crayons or colours", "A table"],
@@ -2498,6 +2647,163 @@ function renderGuestbook() {
     </li>`
     )
     .join("");
+}
+
+// =============================================================================
+// CREW & VOLUNTEERS (committee/logistics roster)
+// =============================================================================
+let crewRoles = [];
+const SEED_CREW_ROLES = [
+  "Setup crew (before event)",
+  "Cleanup crew (after event)",
+  "Food & serving crew",
+  "Games & activities host",
+];
+
+function initCrewRoles() {
+  const ref = query(collection(db, "crewRoles"), orderBy("createdAt", "asc"));
+  onSnapshot(
+    ref,
+    async (snap) => {
+      crewRoles = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      if (crewRoles.length === 0) {
+        await seedCrewRolesIfEmpty();
+        return; // the listener fires again once seeding completes
+      }
+      renderCrewRoles();
+    },
+    (err) => console.error("crewRoles listener:", err)
+  );
+
+  $("#crewRoleForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const input = $("#crewRoleInput");
+    const name = input.value.trim();
+    if (!name) return;
+    try {
+      await addDoc(collection(db, "crewRoles"), {
+        name,
+        volunteers: [],
+        isSeed: false,
+        addedBy: getMyName(),
+        createdAt: serverTimestamp(),
+      });
+      input.value = "";
+    } catch (err) {
+      console.error(err);
+      showToast("Couldn't add — check your connection");
+    }
+  });
+}
+
+let seedingCrew = false;
+async function seedCrewRolesIfEmpty() {
+  if (seedingCrew) return;
+  const snap = await getDocs(collection(db, "crewRoles"));
+  if (!snap.empty) return;
+  seedingCrew = true;
+  try {
+    const batch = writeBatch(db);
+    SEED_CREW_ROLES.forEach((name) => {
+      const ref = doc(collection(db, "crewRoles"));
+      batch.set(ref, { name, volunteers: [], isSeed: true, addedBy: "", createdAt: serverTimestamp() });
+    });
+    await batch.commit();
+  } catch (err) {
+    console.error("seeding crew roles failed:", err);
+  } finally {
+    seedingCrew = false;
+  }
+}
+
+function renderCrewRoles() {
+  const list = $("#crewRoleList");
+  if (!crewRoles.length) {
+    list.innerHTML = `<li class="muted">No roles yet — add one above.</li>`;
+    return;
+  }
+  const myName = getMyName();
+  list.innerHTML = crewRoles
+    .map((r) => {
+      const volunteers = r.volunteers || [];
+      const joined = volunteers.includes(myName);
+      return `
+    <li class="crew-role-item">
+      <div class="crew-role-head">
+        <span class="crew-role-name">${escapeHtml(r.name)}</span>
+        <span class="crew-role-actions">
+          <button class="crew-join-btn ${joined ? "joined" : ""}" data-join="${r.id}">${joined ? "✓ Joined" : "Join"}</button>
+          ${r.isSeed ? "" : `<button class="icon-action" data-del="${r.id}" title="Remove">🗑️</button>`}
+        </span>
+      </div>
+      <div class="crew-volunteers">${
+        volunteers.length ? "👥 " + escapeHtml(volunteers.join(", ")) : `<span class="none">No volunteers yet</span>`
+      }</div>
+    </li>`;
+    })
+    .join("");
+
+  $$("[data-join]", list).forEach((btn) => btn.addEventListener("click", () => toggleCrewJoin(btn.dataset.join)));
+  $$("[data-del]", list).forEach((btn) =>
+    btn.addEventListener("click", () => {
+      if (window.confirm("Remove this role?")) {
+        deleteDoc(doc(db, "crewRoles", btn.dataset.del)).catch((err) => console.error(err));
+      }
+    })
+  );
+}
+
+function toggleCrewJoin(id) {
+  const r = crewRoles.find((x) => x.id === id);
+  if (!r) return;
+  const myName = getMyName();
+  const joined = (r.volunteers || []).includes(myName);
+  updateDoc(doc(db, "crewRoles", id), { volunteers: joined ? arrayRemove(myName) : arrayUnion(myName) }).catch((err) => {
+    console.error(err);
+    showToast("Couldn't update — check your connection");
+  });
+}
+
+// =============================================================================
+// COMMUNICATIONS (WhatsApp / email reminders)
+// =============================================================================
+function reminderMessageText() {
+  const name = eventInfo.eventName || "our family get-together";
+  const start = eventStartDateTime();
+  const dateStr = start ? start.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" }) : "";
+  const timeStr = eventTimeRangeLabel();
+  const venue = eventInfo.venue || "";
+  let msg = `Hi! Quick reminder about ${name}`;
+  if (dateStr) msg += ` on ${dateStr}`;
+  if (timeStr) msg += ` at ${timeStr}`;
+  msg += ".";
+  if (venue) msg += ` 📍 ${venue}.`;
+  msg += " See you there! 🎉";
+  return msg;
+}
+
+function initCommunications() {
+  refreshShareLinks();
+}
+
+// Kept as real <a href> links (rather than JS-triggered navigation) so
+// clicking behaves like any normal link — reliable across browsers and
+// easy to verify. Call this whenever the event details change.
+function refreshShareLinks() {
+  const text = encodeURIComponent(reminderMessageText());
+  const waLink = $("#shareWhatsappBtn");
+  if (waLink) waLink.href = `https://wa.me/?text=${text}`;
+  const subject = encodeURIComponent(`Reminder: ${eventInfo.eventName || "Family Get-Together"}`);
+  const emailLink = $("#shareEmailBtn");
+  if (emailLink) emailLink.href = `mailto:?subject=${subject}&body=${text}`;
+}
+
+function attendeeWhatsappHref(a) {
+  if (!a || !a.phone) return "";
+  const digits = a.phone.replace(/[^\d+]/g, "").replace(/^\+/, "");
+  if (!digits) return "";
+  const text = encodeURIComponent(`Hi ${a.familyName}! ` + reminderMessageText());
+  return `https://wa.me/${digits}?text=${text}`;
 }
 
 // =============================================================================
