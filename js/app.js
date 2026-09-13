@@ -41,6 +41,29 @@ function showToast(msg, ms = 2600) {
   showToast._t = setTimeout(() => el.classList.add("hidden"), ms);
 }
 
+// -----------------------------------------------------------------------------
+// Dark mode — applied immediately (before Firebase even loads) so the boot
+// loader and setup banner also render in the right theme, not just the app
+// shell. Every color in the CSS is read through the custom properties on
+// :root, so toggling a single data-theme attribute re-themes everything.
+// -----------------------------------------------------------------------------
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  const btn = $("#themeToggleBtn");
+  if (btn) btn.textContent = theme === "dark" ? "☀️" : "🌙";
+}
+function initTheme() {
+  const stored = localStorage.getItem("gtc_theme");
+  const prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+  applyTheme(stored || (prefersDark ? "dark" : "light"));
+  $("#themeToggleBtn")?.addEventListener("click", () => {
+    const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+    applyTheme(next);
+    localStorage.setItem("gtc_theme", next);
+  });
+}
+initTheme();
+
 function getMyName() {
   let name = localStorage.getItem("gtc_name");
   if (!name) {
@@ -115,6 +138,7 @@ async function boot() {
   initSchedule();
   initPhotos();
   initGames();
+  initScoreboard();
   initWishlist();
   initGuestbook();
   initCrewRoles();
@@ -557,7 +581,6 @@ function renderAttendees() {
   $("#attCateringHeads").textContent = formatWeight(t.cateringHeads);
 
   renderDietaryRollup(attendees);
-  renderSeatingOverview(attendees);
 
   const body = $("#attendeeTableBody");
   if (!filtered.length) {
@@ -625,47 +648,6 @@ function renderDietaryRollup(list) {
   el.innerHTML = entries
     .map((e) => `<span class="dietary-tag">🥗 ${escapeHtml(e.label)} <span class="count">${e.count}</span></span>`)
     .join("");
-}
-
-function renderSeatingOverview(list) {
-  const el = $("#seatingOverview");
-  const groups = {};
-  const unassigned = [];
-  list.forEach((a) => {
-    const heads = (Number(a.adults) || 0) + (Number(a.kids512) || 0) + (Number(a.kidsU5) || 0);
-    if (a.table && a.table.trim()) {
-      const key = a.table.trim();
-      groups[key] = groups[key] || { names: [], heads: 0 };
-      groups[key].names.push(a.familyName);
-      groups[key].heads += heads;
-    } else {
-      unassigned.push(a.familyName);
-    }
-  });
-  const keys = Object.keys(groups).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-  if (!keys.length && !unassigned.length) {
-    el.innerHTML = `<p class="muted">Assign tables when adding attendees to see the layout here.</p>`;
-    return;
-  }
-  let html = keys
-    .map(
-      (k) => `
-    <div class="seating-group">
-      <span class="table-heads">${groups[k].heads} 👤</span>
-      <span class="table-name">🪑 ${escapeHtml(k)}</span>
-      <div class="table-families">${escapeHtml(groups[k].names.join(", "))}</div>
-    </div>`
-    )
-    .join("");
-  if (unassigned.length) {
-    html += `
-    <div class="seating-group">
-      <span class="table-heads">${unassigned.length} 👤</span>
-      <span class="table-name">❔ Unassigned</span>
-      <div class="table-families">${escapeHtml(unassigned.join(", "))}</div>
-    </div>`;
-  }
-  el.innerHTML = html;
 }
 
 function openAttendeeModal(existing) {
@@ -849,6 +831,7 @@ function initBudget() {
   $("#addBudgetBtn").addEventListener("click", () => openBudgetModal());
   $("#exportBudgetBtn").addEventListener("click", exportBudgetCsv);
   $("#setCapsBtn").addEventListener("click", openCategoryCapsModal);
+  $("#shareCostSplitBtn").addEventListener("click", shareCostSplitCard);
 }
 
 function openCategoryCapsModal() {
@@ -947,7 +930,7 @@ function renderBudget() {
       const total = budgetItemTotal(b);
       const done = budgetItemDone(b);
       return `<tr class="${done ? "row-done" : ""}">
-        <td data-label="Item"><strong>${escapeHtml(b.itemName)}</strong></td>
+        <td data-label="Item"><strong>${escapeHtml(b.itemName)}</strong>${b.receiptUrl ? ` <a href="${b.receiptUrl}" target="_blank" rel="noopener" class="receipt-link" title="View receipt">🧾</a>` : ""}</td>
         <td data-label="Category">${CATEGORY_ICONS[b.category] || "📦"} ${escapeHtml(b.category || "")}</td>
         <td data-label="Price"><strong>${fmtMoney(total)}</strong></td>
         <td data-label="Assigned to" class="muted">${b.assignedTo ? escapeHtml(b.assignedTo) : "—"}</td>
@@ -1022,6 +1005,155 @@ function renderCostSplit() {
   });
 }
 
+// Draws a branded, shareable "who owes what" summary as a portrait image —
+// easy to screenshot-share, but generating it as one clean image (rather
+// than asking people to screenshot the app) means no cut-off rows, no
+// toggle switches or edit buttons in the shot, and it works even for
+// someone who isn't looking at the app at all (e.g. sent straight over
+// WhatsApp).
+function buildCostSplitCardCanvas(statsSource, grand, perHead) {
+  const W = 1080;
+  const rowH = 96;
+  const headerH = 430;
+  const footerH = 110;
+  const H = headerH + statsSource.length * rowH + footerH;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext("2d");
+
+  // Background gradient — same peacock → peacock-dark → magenta-deep as the
+  // app's own hero card, so this feels like it came from the app.
+  const grad = ctx.createLinearGradient(0, 0, W * 0.3, H);
+  grad.addColorStop(0, "#0f7c78");
+  grad.addColorStop(0.45, "#0a5c59");
+  grad.addColorStop(1, "#7c0d44");
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+
+  // Gold hairlines top & bottom, matching the PowerPoint export's branding.
+  ctx.fillStyle = "#cc9a3d";
+  ctx.fillRect(0, 0, W, 6);
+  ctx.fillRect(0, H - 6, W, 6);
+
+  ctx.textAlign = "center";
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "700 30px Georgia, serif";
+  ctx.fillText(eventInfo.eventName || "Family Get-Together", W / 2, 92);
+
+  ctx.font = "700 46px Georgia, serif";
+  ctx.fillText("🤝 Who owes what", W / 2, 160);
+
+  const start = eventStartDateTime();
+  const dateVenueLine = [
+    start ? start.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" }) : "",
+    eventInfo.venue,
+  ]
+    .filter(Boolean)
+    .join("   ·   ");
+  if (dateVenueLine) {
+    ctx.font = "500 24px Inter, sans-serif";
+    ctx.fillStyle = "#f0d78c";
+    ctx.fillText(dateVenueLine, W / 2, 205);
+  }
+
+  ctx.font = "800 64px Inter, sans-serif";
+  ctx.fillStyle = "#ffffff";
+  ctx.fillText(fmtMoney(grand), W / 2, 300);
+  ctx.font = "500 24px Inter, sans-serif";
+  ctx.fillStyle = "#f0d78c";
+  ctx.fillText(
+    `${fmtMoney(perHead)} per catering head  ·  ${formatWeight(statsSource.reduce((s, a) => s + cateringWeight(a), 0))} heads total`,
+    W / 2,
+    340
+  );
+
+  // Rounded white card behind the per-family rows.
+  const cardX = 48, cardY = headerH - 30, cardW = W - 96, cardH = statsSource.length * rowH + 30;
+  ctx.fillStyle = "#fbf8f2";
+  const r = 24;
+  ctx.beginPath();
+  ctx.moveTo(cardX + r, cardY);
+  ctx.arcTo(cardX + cardW, cardY, cardX + cardW, cardY + cardH, r);
+  ctx.arcTo(cardX + cardW, cardY + cardH, cardX, cardY + cardH, r);
+  ctx.arcTo(cardX, cardY + cardH, cardX, cardY, r);
+  ctx.arcTo(cardX, cardY, cardX + cardW, cardY, r);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.textAlign = "left";
+  statsSource.forEach((a, i) => {
+    const y = cardY + 30 + i * rowH;
+    if (i > 0) {
+      ctx.strokeStyle = "#e2e1d6";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(cardX + 32, y);
+      ctx.lineTo(cardX + cardW - 32, y);
+      ctx.stroke();
+    }
+    const w = cateringWeight(a);
+    const share = w * perHead;
+    ctx.fillStyle = "#1c2b29";
+    ctx.font = "700 30px Inter, sans-serif";
+    ctx.fillText(a.familyName, cardX + 32, y + 40);
+    ctx.font = "500 20px Inter, sans-serif";
+    ctx.fillStyle = "#586b67";
+    ctx.fillText(`${formatWeight(w)} heads`, cardX + 32, y + 68);
+
+    ctx.textAlign = "right";
+    ctx.font = "800 32px Inter, sans-serif";
+    ctx.fillStyle = "#7c0d44";
+    ctx.fillText(fmtMoney(share), cardX + cardW - 32, y + 40);
+    ctx.font = "700 20px Inter, sans-serif";
+    ctx.fillStyle = a.paid ? "#2f8f63" : "#c0392b";
+    ctx.fillText(a.paid ? "✅ Paid" : "Unpaid", cardX + cardW - 32, y + 68);
+    ctx.textAlign = "left";
+  });
+
+  ctx.textAlign = "center";
+  ctx.font = "500 20px Inter, sans-serif";
+  ctx.fillStyle = "rgba(255,255,255,0.85)";
+  ctx.fillText("Generated by Get-Together Central", W / 2, H - 40);
+
+  return canvas;
+}
+
+async function shareCostSplitCard() {
+  const statsSource = confirmedOnly() ? attendees.filter((a) => a.rsvp === "Confirmed") : attendees;
+  const grand = budgetGrandTotal(budgetItems);
+  const t = attendeeTotals(statsSource);
+  if (!statsSource.length || grand <= 0 || t.cateringHeads <= 0) {
+    return showToast("Add attendees and expenses first");
+  }
+  showToast("Preparing your summary card…", 3000);
+  try {
+    const perHead = grand / t.cateringHeads;
+    const canvas = buildCostSplitCardCanvas(statsSource, grand, perHead);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+    const fileName = `${(eventInfo.eventName || "event").replace(/[^a-z0-9]+/gi, "_")}_who_owes_what.png`;
+    const file = new File([blob], fileName, { type: "image/png" });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: "Who owes what", text: eventInfo.eventName || "Our get-together" });
+    } else {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+      showToast("Saved! Share the image from your downloads/photos.");
+    }
+  } catch (err) {
+    if (err?.name === "AbortError") return; // user cancelled the share sheet
+    console.error(err);
+    showToast("Couldn't create the summary card");
+  }
+}
+
 function openBudgetModal(existing) {
   const isEdit = !!existing;
   openModal(
@@ -1046,6 +1178,13 @@ function openBudgetModal(existing) {
       <span class="field-label" style="margin:0">✅ Already done / purchased</span>
       <span class="toggle-switch"><input type="checkbox" id="fBDone" ${existing && budgetItemDone(existing) ? "checked" : ""} /><span class="toggle-track"><span class="toggle-thumb"></span></span></span>
     </label>
+    <label class="field-label">Receipt photo <span class="muted">(optional)</span></label>
+    ${
+      existing?.receiptUrl
+        ? `<div class="receipt-preview"><a href="${existing.receiptUrl}" target="_blank" rel="noopener">🧾 View current receipt</a> <span class="muted">— choose a new photo below to replace it</span></div>`
+        : ""
+    }
+    <input type="file" id="fBReceipt" accept="image/*" class="input" />
     <div class="modal-actions">
       <button class="btn btn-ghost" id="bCancel">Cancel</button>
       <button class="btn btn-primary" id="bSave">${isEdit ? "Save changes" : "Add"}</button>
@@ -1065,7 +1204,22 @@ function openBudgetModal(existing) {
             assignedTo: $("#fBAssigned", root).value.trim(),
             done: $("#fBDone", root).checked,
           };
+          const saveBtn = $("#bSave", root);
+          const receiptFile = $("#fBReceipt", root).files[0];
           try {
+            if (receiptFile) {
+              saveBtn.disabled = true;
+              saveBtn.textContent = "Uploading receipt…";
+              const file = await compressImageForUpload(receiptFile);
+              const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+              const path = `receipts/${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${safeName}`;
+              await new Promise((resolve, reject) => {
+                const task = uploadBytesResumable(storageRef(storage, path), file, { contentType: file.type });
+                task.on("state_changed", null, reject, resolve);
+              });
+              data.receiptUrl = await getDownloadURL(storageRef(storage, path));
+              data.receiptPath = path;
+            }
             if (isEdit) {
               await updateDoc(doc(db, "budgetItems", existing.id), data);
             } else {
@@ -1077,6 +1231,8 @@ function openBudgetModal(existing) {
             showToast(isEdit ? "Updated" : "Added!");
           } catch (err) {
             console.error(err);
+            saveBtn.disabled = false;
+            saveBtn.textContent = isEdit ? "Save changes" : "Add";
             showToast("Couldn't save — check your connection");
           }
         });
@@ -1096,9 +1252,9 @@ function confirmDeleteBudget(id) {
 }
 
 function exportBudgetCsv() {
-  const rows = [["Item", "Category", "Price", "Assigned to", "Done", "Added by"]];
+  const rows = [["Item", "Category", "Price", "Assigned to", "Done", "Added by", "Receipt"]];
   budgetItems.forEach((b) => {
-    rows.push([b.itemName, b.category, budgetItemTotal(b), b.assignedTo || "", budgetItemDone(b) ? "Yes" : "No", b.addedBy || ""]);
+    rows.push([b.itemName, b.category, budgetItemTotal(b), b.assignedTo || "", budgetItemDone(b) ? "Yes" : "No", b.addedBy || "", b.receiptUrl || ""]);
   });
   downloadCsv(rows, "budget.csv");
 }
@@ -1288,6 +1444,7 @@ function initPhotos() {
   $("#slideshowBtn").addEventListener("click", () => openSlideshow(0));
   $("#downloadAllBtn").addEventListener("click", downloadAllPhotosZip);
   $("#downloadPptxBtn").addEventListener("click", downloadPhotosPptx);
+  $("#downloadKeepsakeBtn").addEventListener("click", downloadKeepsakePdf);
   $("#photoWallBtn").addEventListener("click", openPhotoWall);
   $("#wallCloseBtn").addEventListener("click", closePhotoWall);
   $$("#photoFilterChips .chip").forEach((chip) => {
@@ -1874,6 +2031,223 @@ async function downloadPhotosPptx() {
   }
 }
 
+// -----------------------------------------------------------------------------
+// "Keepsake" PDF — a single combined document (cover, schedule, attendee
+// list, highlight photos, closing page) as a memento after the event, in
+// the app's own theme. NOTE: jsPDF's built-in fonts only support plain
+// Latin text (no emoji, no Malayalam glyphs) — unlike the PowerPoint export,
+// which can lean on PowerPoint's own font rendering, embedding those here
+// would need a custom embedded font file just to avoid missing-glyph boxes.
+// So PDF page text stays plain ASCII; the festive/bilingual touches stay on
+// the PowerPoint export and the app UI itself, which render them natively.
+// -----------------------------------------------------------------------------
+async function downloadKeepsakePdf() {
+  if (typeof window.jspdf === "undefined") return showToast("Still loading — try again in a moment");
+  showToast("Building your keepsake PDF — this can take a bit for lots of photos…", 6000);
+
+  const PEACOCK = [15, 124, 120];
+  const PEACOCK_DARK = [10, 92, 89];
+  const MAGENTA_DEEP = [124, 13, 68];
+  const GOLD = [204, 154, 61];
+  const CREAM = [251, 248, 242];
+  const CREAM_DEEP = [242, 236, 220];
+  const INK = [28, 43, 41];
+  const INK_SOFT = [88, 107, 103];
+
+  try {
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF({ unit: "pt", format: "a4" });
+    const PW = pdf.internal.pageSize.getWidth();
+    const PH = pdf.internal.pageSize.getHeight();
+    const MARGIN = 50;
+
+    const fullBleed = (rgb) => {
+      pdf.setFillColor(...rgb);
+      pdf.rect(0, 0, PW, PH, "F");
+    };
+    const goldHairlines = () => {
+      pdf.setFillColor(...GOLD);
+      pdf.rect(0, 0, PW, 4, "F");
+      pdf.rect(0, PH - 4, PW, 4, "F");
+    };
+    const pageHeader = (title) => {
+      pdf.setFillColor(...PEACOCK);
+      pdf.rect(0, 0, PW, 70, "F");
+      pdf.setFillColor(...GOLD);
+      pdf.rect(0, 70, PW, 3, "F");
+      pdf.setTextColor(255, 255, 255);
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(20);
+      pdf.text(title, MARGIN, 45);
+    };
+
+    // ---------- Cover page ----------
+    fullBleed(PEACOCK_DARK);
+    goldHairlines();
+    pdf.setTextColor(...GOLD);
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(13);
+    pdf.text("A KEEPSAKE OF OUR GET-TOGETHER", PW / 2, PH / 2 - 60, { align: "center" });
+    pdf.setTextColor(255, 255, 255);
+    pdf.setFontSize(32);
+    pdf.text(eventInfo.eventName || "Family Get-Together", PW / 2, PH / 2 - 10, { align: "center", maxWidth: PW - 100 });
+    const start = eventStartDateTime();
+    const dateVenueLine = [
+      start ? start.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" }) : "",
+      eventTimeRangeLabel(),
+      eventInfo.venue,
+    ]
+      .filter(Boolean)
+      .join("   ·   ");
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(13);
+    pdf.setTextColor(240, 215, 140);
+    pdf.text(dateVenueLine, PW / 2, PH / 2 + 34, { align: "center", maxWidth: PW - 100 });
+    pdf.setFontSize(11);
+    pdf.setTextColor(200, 220, 218);
+    pdf.text("Compiled with love by the committee", PW / 2, PH - 70, { align: "center" });
+
+    // ---------- Schedule page ----------
+    if (scheduleItems.length) {
+      pdf.addPage();
+      fullBleed(CREAM);
+      pageHeader("Event schedule");
+      let y = 110;
+      const sorted = [...scheduleItems].sort((a, b) => (a.startTime || "").localeCompare(b.startTime || ""));
+      sorted.forEach((s) => {
+        if (y > PH - 60) {
+          pdf.addPage();
+          fullBleed(CREAM);
+          y = 60;
+        }
+        pdf.setFillColor(...CREAM_DEEP);
+        pdf.roundedRect(MARGIN, y - 20, PW - MARGIN * 2, 46, 6, 6, "F");
+        pdf.setTextColor(...PEACOCK_DARK);
+        pdf.setFont("helvetica", "bold");
+        pdf.setFontSize(11);
+        const timeLabel = s.endTime ? `${fmtTime12(s.startTime)} - ${fmtTime12(s.endTime)}` : fmtTime12(s.startTime);
+        pdf.text(timeLabel || "", MARGIN + 14, y + 4);
+        pdf.setTextColor(...INK);
+        pdf.setFontSize(13);
+        pdf.text(s.title || "", MARGIN + 130, y + 4, { maxWidth: PW - MARGIN * 2 - 150 });
+        if (s.type) {
+          pdf.setFont("helvetica", "italic");
+          pdf.setFontSize(9);
+          pdf.setTextColor(...INK_SOFT);
+          pdf.text(s.type, MARGIN + 130, y + 18);
+        }
+        y += 56;
+      });
+    }
+
+    // ---------- Attendees page ----------
+    if (attendees.length) {
+      pdf.addPage();
+      fullBleed(CREAM);
+      pageHeader("Who came");
+      const t = attendeeTotals(attendees);
+      pdf.setTextColor(...INK_SOFT);
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(11);
+      pdf.text(
+        `${t.families} families/entries  -  ${t.total} people total (${t.adults} adults, ${t.kids512} kids 5-12, ${t.kidsU5} kids under 5)`,
+        MARGIN,
+        95
+      );
+      let y = 125;
+      [...attendees]
+        .sort((a, b) => (a.familyName || "").localeCompare(b.familyName || ""))
+        .forEach((a, i) => {
+          if (y > PH - 50) {
+            pdf.addPage();
+            fullBleed(CREAM);
+            y = 60;
+          }
+          if (i % 2 === 0) {
+            pdf.setFillColor(...CREAM_DEEP);
+            pdf.rect(MARGIN, y - 14, PW - MARGIN * 2, 24, "F");
+          }
+          const total = (Number(a.adults) || 0) + (Number(a.kids512) || 0) + (Number(a.kidsU5) || 0);
+          pdf.setTextColor(...INK);
+          pdf.setFont("helvetica", "bold");
+          pdf.setFontSize(11);
+          pdf.text(a.familyName || "", MARGIN + 10, y + 3);
+          pdf.setFont("helvetica", "normal");
+          pdf.setTextColor(...INK_SOFT);
+          pdf.text(
+            `${total} people${a.table ? "  -  Table: " + a.table : ""}${a.rsvp ? "  -  " + a.rsvp : ""}`,
+            MARGIN + 220,
+            y + 3
+          );
+          y += 24;
+        });
+    }
+
+    // ---------- Highlight photos (liked first, capped so the PDF stays a
+    // reasonable size and build time) ----------
+    const ordered = [...photos].sort((a, b) => (b.likedBy || []).length - (a.likedBy || []).length).slice(0, 12);
+    let failCount = 0;
+    const boxW = PW - 100,
+      boxH = PH - 170;
+    for (const p of ordered) {
+      let framed;
+      try {
+        const raw = await imageUrlToBase64(p.downloadURL);
+        framed = await containFitToDataUrl(raw, boxW, boxH, 1400);
+      } catch (e) {
+        console.error("skipping photo in keepsake PDF:", e);
+        failCount++;
+        continue;
+      }
+      pdf.addPage();
+      fullBleed(PEACOCK_DARK);
+      goldHairlines();
+      const x = (PW - boxW) / 2,
+        y = 80;
+      pdf.setDrawColor(...GOLD);
+      pdf.setLineWidth(1.5);
+      pdf.rect(x - 6, y - 6, boxW + 12, boxH + 12);
+      pdf.addImage(framed, "JPEG", x, y, boxW, boxH);
+      if ((p.likedBy || []).length > 0) {
+        pdf.setFillColor(...MAGENTA_DEEP);
+        pdf.roundedRect(PW - 130, 30, 90, 26, 13, 13, "F");
+        pdf.setTextColor(255, 255, 255);
+        pdf.setFont("helvetica", "bold");
+        pdf.setFontSize(9);
+        pdf.text("HIGHLIGHT", PW - 85, 47, { align: "center" });
+      }
+    }
+
+    // ---------- Closing page ----------
+    pdf.addPage();
+    fullBleed(PEACOCK_DARK);
+    goldHairlines();
+    pdf.setTextColor(255, 255, 255);
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(28);
+    pdf.text("Thank You!", PW / 2, PH / 2 - 10, { align: "center" });
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(13);
+    pdf.setTextColor(240, 215, 140);
+    pdf.text("Until the next get-together", PW / 2, PH / 2 + 26, { align: "center" });
+    if (dateVenueLine) {
+      pdf.setFontSize(11);
+      pdf.setTextColor(200, 220, 218);
+      pdf.text(dateVenueLine, PW / 2, PH / 2 + 52, { align: "center", maxWidth: PW - 100 });
+    }
+
+    pdf.save(`${(eventInfo.eventName || "event").replace(/[^a-z0-9]+/gi, "_")}_keepsake.pdf`);
+    if (failCount > 0) {
+      showToast(`Keepsake PDF ready — ${failCount} photo${failCount === 1 ? "" : "s"} couldn't be loaded and ${failCount === 1 ? "was" : "were"} skipped.`, 7000);
+    } else {
+      showToast("Keepsake PDF ready!");
+    }
+  } catch (err) {
+    console.error(err);
+    showToast("Couldn't build the keepsake PDF — try again");
+  }
+}
+
 // ---------- Slideshow lightbox ----------
 let slideshowIndex = 0;
 let slideshowTimer = null;
@@ -2297,6 +2671,156 @@ const GAME_SCRIPTS = {
     tips: ["Keep it casual and inclusive — rotate the batting order so everyone gets a turn."],
   },
 };
+
+// -----------------------------------------------------------------------------
+// Teams & live scoreboard (Games tab). Teams are stored in Firestore
+// (scoreboardTeams) so every committee member watching on their own phone
+// sees score changes the moment someone else taps +1 — same realtime
+// pattern as everything else in the app.
+// -----------------------------------------------------------------------------
+let scoreboardTeams = [];
+const TEAM_COLORS = ["#0f7c78", "#b1145f", "#cc9a3d", "#5ecbc3", "#7c0d44", "#2f8f63", "#0a5c59", "#e0685c"];
+
+function initScoreboard() {
+  const ref = query(collection(db, "scoreboardTeams"), orderBy("createdAt", "asc"));
+  onSnapshot(
+    ref,
+    (snap) => {
+      scoreboardTeams = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      renderScoreboard();
+    },
+    (err) => console.error("scoreboard listener:", err)
+  );
+
+  $("#shuffleTeamsBtn").addEventListener("click", shuffleTeamsFromAttendees);
+  $("#resetScoresBtn").addEventListener("click", resetTeamScores);
+  $("#clearTeamsBtn").addEventListener("click", clearTeams);
+  $("#addTeamForm").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const input = $("#addTeamInput");
+    const name = input.value.trim();
+    if (!name) return;
+    addDoc(collection(db, "scoreboardTeams"), {
+      name,
+      score: 0,
+      members: [],
+      color: TEAM_COLORS[scoreboardTeams.length % TEAM_COLORS.length],
+      createdAt: serverTimestamp(),
+    }).catch((err) => {
+      console.error(err);
+      showToast("Couldn't add team — check your connection");
+    });
+    input.value = "";
+  });
+}
+
+// Balances by weighted catering headcount (not just family count), so a
+// family of 6 and a solo guest don't just get counted as "1 unit" each —
+// teams come out roughly even in actual number of people playing.
+async function shuffleTeamsFromAttendees() {
+  const n = Math.max(2, Math.min(10, parseInt($("#teamCount").value, 10) || 2));
+  const pool = confirmedOnly() ? attendees.filter((a) => a.rsvp === "Confirmed") : attendees;
+  if (!pool.length) return showToast("Add some attendees first");
+  if (!window.confirm(`Shuffle into ${n} new teams? This replaces the current teams.`)) return;
+
+  const entries = pool.map((a) => ({ name: a.familyName, heads: cateringWeight(a) || 1 }));
+  entries.sort((a, b) => b.heads - a.heads);
+  const teams = Array.from({ length: n }, () => ({ members: [], total: 0 }));
+  entries.forEach((e) => {
+    teams.sort((a, b) => a.total - b.total);
+    teams[0].members.push(e.name);
+    teams[0].total += e.heads;
+  });
+
+  try {
+    await Promise.all(scoreboardTeams.map((t) => deleteDoc(doc(db, "scoreboardTeams", t.id))));
+    const batch = writeBatch(db);
+    teams.forEach((t, i) => {
+      const ref = doc(collection(db, "scoreboardTeams"));
+      batch.set(ref, {
+        name: `Team ${i + 1}`,
+        score: 0,
+        members: t.members,
+        color: TEAM_COLORS[i % TEAM_COLORS.length],
+        createdAt: serverTimestamp(),
+      });
+    });
+    await batch.commit();
+    showToast(`Shuffled into ${n} teams!`);
+  } catch (err) {
+    console.error(err);
+    showToast("Couldn't shuffle teams — check your connection");
+  }
+}
+
+function resetTeamScores() {
+  if (!scoreboardTeams.length) return showToast("No teams yet");
+  Promise.all(scoreboardTeams.map((t) => updateDoc(doc(db, "scoreboardTeams", t.id), { score: 0 })))
+    .then(() => showToast("Scores reset"))
+    .catch((err) => {
+      console.error(err);
+      showToast("Couldn't reset — check your connection");
+    });
+}
+
+function clearTeams() {
+  if (!scoreboardTeams.length) return showToast("No teams yet");
+  if (!window.confirm("Remove all teams?")) return;
+  Promise.all(scoreboardTeams.map((t) => deleteDoc(doc(db, "scoreboardTeams", t.id))))
+    .then(() => showToast("Teams cleared"))
+    .catch((err) => {
+      console.error(err);
+      showToast("Couldn't clear teams — check your connection");
+    });
+}
+
+function adjustTeamScore(id, delta) {
+  const t = scoreboardTeams.find((x) => x.id === id);
+  if (!t) return;
+  updateDoc(doc(db, "scoreboardTeams", id), { score: (Number(t.score) || 0) + delta }).catch((err) => {
+    console.error(err);
+    showToast("Couldn't update — check your connection");
+  });
+}
+
+function renderScoreboard() {
+  const el = $("#scoreboardList");
+  if (!el) return;
+  if (!scoreboardTeams.length) {
+    el.innerHTML = `<p class="muted">No teams yet — shuffle to create some, or add a team manually below.</p>`;
+    return;
+  }
+  const sorted = scoreboardTeams.slice().sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0));
+  el.innerHTML = sorted
+    .map(
+      (t, i) => `
+    <div class="scoreboard-row" style="--team-color:${t.color || "var(--peacock)"}">
+      <div class="scoreboard-rank">${i === 0 && Number(t.score) > 0 ? "🏆" : i + 1}</div>
+      <div class="scoreboard-info">
+        <div class="scoreboard-name">${escapeHtml(t.name)}</div>
+        ${t.members && t.members.length ? `<div class="scoreboard-members muted">${escapeHtml(t.members.join(", "))}</div>` : ""}
+      </div>
+      <div class="scoreboard-score">${Number(t.score) || 0}</div>
+      <div class="scoreboard-btns">
+        <button class="icon-action" data-score="${t.id}" data-delta="-1" title="Minus 1">−1</button>
+        <button class="icon-action" data-score="${t.id}" data-delta="1" title="Plus 1">+1</button>
+        <button class="icon-action" data-score="${t.id}" data-delta="5" title="Plus 5">+5</button>
+        <button class="icon-action" data-del-team="${t.id}" title="Remove team">🗑️</button>
+      </div>
+    </div>`
+    )
+    .join("");
+  $$("[data-score]", el).forEach((btn) =>
+    btn.addEventListener("click", () => adjustTeamScore(btn.dataset.score, parseInt(btn.dataset.delta, 10)))
+  );
+  $$("[data-del-team]", el).forEach((btn) =>
+    btn.addEventListener("click", () => {
+      if (window.confirm("Remove this team?")) {
+        deleteDoc(doc(db, "scoreboardTeams", btn.dataset.delTeam)).catch((err) => console.error(err));
+      }
+    })
+  );
+}
 
 let games = [];
 
