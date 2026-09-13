@@ -24,6 +24,12 @@
 </head>
 <body>
 
+<!-- ============ Boot loader (shown until Firebase connects or fails) ============ -->
+<div id="bootLoader" class="boot-loader">
+  <div class="boot-spinner" aria-hidden="true"></div>
+  <p>Loading Get-Together Central…</p>
+</div>
+
 <!-- ============ Setup banner (shown until Firebase is configured) ============ -->
 <div id="setupBanner" class="setup-banner hidden">
   <div class="setup-banner-inner">
@@ -394,6 +400,11 @@
     </section>
 
   </main>
+
+  <!-- Floating quick-add button — phones/small tablets only (desktop tabs
+       already have their own visible "add" button in the panel header).
+       Its icon and action follow whichever tab is currently open. -->
+  <button id="fabAddBtn" class="fab hidden" aria-label="Quick add">➕</button>
 </div>
 
 <!-- ============ Generic modal ============ -->
