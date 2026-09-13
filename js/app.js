@@ -73,8 +73,13 @@ $("#modalOverlay").addEventListener("click", (e) => {
 let db, storage;
 const FIREBASE_SDK_VERSION = "10.13.2";
 
+function hideBootLoader() {
+  $("#bootLoader")?.classList.add("hidden");
+}
+
 async function boot() {
   if (!isFirebaseConfigured(firebaseConfig)) {
+    hideBootLoader();
     $("#setupBanner").classList.remove("hidden");
     return;
   }
@@ -97,9 +102,11 @@ async function boot() {
     console.error(err);
     $("#setupBannerMsg").textContent =
       "Couldn't connect to Firebase — double check the values in js/firebase-config.js, and that you're online. (" + err.message + ")";
+    hideBootLoader();
     $("#setupBanner").classList.remove("hidden");
     return;
   }
+  hideBootLoader();
   $("#app").classList.remove("hidden");
   initTabs();
   initSettings();
@@ -132,6 +139,8 @@ function initTabs() {
       if (tab === "games") $("#surpriseBtn").click();
     });
   });
+  initFab();
+  updateFab("dashboard");
 }
 function switchTab(name) {
   $$(".tab-btn").forEach((b) => {
@@ -140,6 +149,39 @@ function switchTab(name) {
     b.setAttribute("aria-selected", active ? "true" : "false");
   });
   $$(".tab-panel").forEach((p) => p.classList.toggle("active", p.id === "tab-" + name));
+  updateFab(name);
+}
+
+// -----------------------------------------------------------------------------
+// Floating quick-add button (mobile) — its icon/action follows whichever
+// tab is currently open. Hidden on the Home tab, which already has its own
+// "Quick add" grid, so there's nothing redundant on screen.
+// -----------------------------------------------------------------------------
+const FAB_ACTIONS = {
+  attendees: { icon: "➕", action: () => $("#addAttendeeBtn").click() },
+  budget: { icon: "➕", action: () => $("#addBudgetBtn").click() },
+  schedule: { icon: "➕", action: () => $("#addScheduleBtn").click() },
+  photos: { icon: "📤", action: () => $("#photoInput").click() },
+  games: { icon: "➕", action: () => $("#addGameBtn").click() },
+};
+function updateFab(tabName) {
+  const fab = $("#fabAddBtn");
+  if (!fab) return;
+  const config = FAB_ACTIONS[tabName];
+  if (!config) {
+    fab.classList.add("hidden");
+    return;
+  }
+  fab.textContent = config.icon;
+  fab.classList.remove("hidden");
+}
+function initFab() {
+  const fab = $("#fabAddBtn");
+  if (!fab) return;
+  fab.addEventListener("click", () => {
+    const activeTab = $(".tab-btn.active")?.dataset.tab;
+    FAB_ACTIONS[activeTab]?.action();
+  });
 }
 
 // =============================================================================
@@ -531,18 +573,18 @@ function renderAttendees() {
     .map((a) => {
       const total = (Number(a.adults) || 0) + (Number(a.kids512) || 0) + (Number(a.kidsU5) || 0);
       return `<tr>
-        <td><strong>${escapeHtml(a.familyName)}</strong></td>
-        <td class="muted">${a.phone ? `<a href="tel:${escapeHtml(a.phone)}">${escapeHtml(a.phone)}</a>` : ""}</td>
-        <td>${a.adults || 0}</td>
-        <td>${a.kids512 || 0}</td>
-        <td>${a.kidsU5 || 0}</td>
-        <td><strong>${total}</strong></td>
-        <td>${formatWeight(cateringWeight(a))}</td>
-        <td class="muted">${escapeHtml(a.table || "")}</td>
-        <td>${rsvpBadge(a.rsvp)}</td>
-        <td class="muted">${escapeHtml(a.dietary || "")}</td>
-        <td class="muted">${escapeHtml(a.notes || "")}</td>
-        <td class="muted">${escapeHtml(a.addedBy || "")}</td>
+        <td data-label="Family / Person"><strong>${escapeHtml(a.familyName)}</strong></td>
+        <td data-label="Phone" class="muted">${a.phone ? `<a href="tel:${escapeHtml(a.phone)}">${escapeHtml(a.phone)}</a>` : ""}</td>
+        <td data-label="Adults">${a.adults || 0}</td>
+        <td data-label="Kids 5–12">${a.kids512 || 0}</td>
+        <td data-label="Kids <5">${a.kidsU5 || 0}</td>
+        <td data-label="Total"><strong>${total}</strong></td>
+        <td data-label="Cat. Head">${formatWeight(cateringWeight(a))}</td>
+        <td data-label="Table" class="muted">${escapeHtml(a.table || "")}</td>
+        <td data-label="RSVP">${rsvpBadge(a.rsvp)}</td>
+        <td data-label="Dietary" class="muted">${escapeHtml(a.dietary || "")}</td>
+        <td data-label="Notes" class="muted">${escapeHtml(a.notes || "")}</td>
+        <td data-label="Added by" class="muted">${escapeHtml(a.addedBy || "")}</td>
         <td class="row-actions">
           ${a.phone ? `<a class="icon-action" href="${attendeeWhatsappHref(a)}" target="_blank" rel="noopener" title="WhatsApp reminder">💬</a>` : ""}
           <button class="icon-action" data-edit="${a.id}" title="Edit">✏️</button>
@@ -905,17 +947,17 @@ function renderBudget() {
       const total = budgetItemTotal(b);
       const done = budgetItemDone(b);
       return `<tr class="${done ? "row-done" : ""}">
-        <td><strong>${escapeHtml(b.itemName)}</strong></td>
-        <td>${CATEGORY_ICONS[b.category] || "📦"} ${escapeHtml(b.category || "")}</td>
-        <td><strong>${fmtMoney(total)}</strong></td>
-        <td class="muted">${b.assignedTo ? escapeHtml(b.assignedTo) : "—"}</td>
-        <td>
+        <td data-label="Item"><strong>${escapeHtml(b.itemName)}</strong></td>
+        <td data-label="Category">${CATEGORY_ICONS[b.category] || "📦"} ${escapeHtml(b.category || "")}</td>
+        <td data-label="Price"><strong>${fmtMoney(total)}</strong></td>
+        <td data-label="Assigned to" class="muted">${b.assignedTo ? escapeHtml(b.assignedTo) : "—"}</td>
+        <td data-label="Done">
           <label class="done-checkbox-label">
             <input type="checkbox" data-done="${b.id}" ${done ? "checked" : ""} />
             ${done ? "✅ Done" : "Planned"}
           </label>
         </td>
-        <td class="muted">${escapeHtml(b.addedBy || "")}</td>
+        <td data-label="Added by" class="muted">${escapeHtml(b.addedBy || "")}</td>
         <td class="row-actions">
           <button class="icon-action" data-edit="${b.id}" title="Edit">✏️</button>
           <button class="icon-action" data-del="${b.id}" title="Delete">🗑️</button>
@@ -1364,15 +1406,54 @@ function togglePhotoLike(id) {
   });
 }
 
+// Resizes/re-compresses a photo client-side before it ever leaves the phone —
+// most phone cameras produce 3-4000px, multi-MB photos, and at slideshow/
+// PowerPoint/TV-wall size none of that extra resolution is visible, so this
+// trades it for a much faster upload on venue WiFi or mobile data. Falls
+// back to the original file untouched if anything about compression fails,
+// or if the file is already small enough that it isn't worth the CPU time.
+async function compressImageForUpload(file, maxDim = 1920, quality = 0.82) {
+  if (file.type === "image/gif") return file; // would lose animation
+  if (file.size < 350 * 1024) return file; // already small
+  try {
+    const dataUrl = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(new Error("Couldn't read file"));
+      reader.readAsDataURL(file);
+    });
+    const img = await loadImageEl(dataUrl);
+    const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+    if (scale >= 1 && file.size < 2 * 1024 * 1024) return file; // already reasonable
+    const w = Math.round(img.width * scale);
+    const h = Math.round(img.height * scale);
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", quality));
+    if (!blob || blob.size >= file.size) return file; // compression didn't actually help
+    const newName = file.name.replace(/\.[^.]+$/, "") + ".jpg";
+    return new File([blob], newName, { type: "image/jpeg" });
+  } catch (e) {
+    console.warn("photo compression skipped, uploading original:", e);
+    return file;
+  }
+}
+
 async function handlePhotoUpload(fileList) {
-  const files = Array.from(fileList || []).filter((f) => f.type.startsWith("image/"));
-  if (!files.length) return;
+  const rawFiles = Array.from(fileList || []).filter((f) => f.type.startsWith("image/"));
+  if (!rawFiles.length) return;
   const uploaderName = getMyName();
 
   const wrap = $("#uploadProgressWrap");
   const fill = $("#uploadProgressFill");
   const label = $("#uploadProgressLabel");
   wrap.classList.remove("hidden");
+  fill.style.width = "0%";
+  label.textContent = rawFiles.length > 1 ? "Preparing photos…" : "Preparing photo…";
+
+  const files = await Promise.all(rawFiles.map((f) => compressImageForUpload(f)));
 
   const totals = files.map((f) => f.size);
   const transferred = files.map(() => 0);
@@ -1519,18 +1600,21 @@ function makeDynamicBackgroundDataUrl(pxW, pxH) {
   canvas.width = pxW;
   canvas.height = pxH;
   const ctx = canvas.getContext("2d");
+  // Same peacock → peacock-dark → magenta-deep gradient as the app's own
+  // hero banner (css/styles.css .hero-card), so the PowerPoint feels like
+  // it belongs to the same app rather than a completely different theme.
   const grad = ctx.createLinearGradient(0, 0, pxW, pxH);
-  grad.addColorStop(0, "#241B3D");
-  grad.addColorStop(0.55, "#7A2D63");
-  grad.addColorStop(1, "#FF7A55");
+  grad.addColorStop(0, "#0f7c78");
+  grad.addColorStop(0.5, "#0a5c59");
+  grad.addColorStop(1, "#7c0d44");
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, pxW, pxH);
 
   const orbs = [
-    { x: pxW * 0.12, y: pxH * 0.2, r: pxW * 0.22, color: "rgba(255,193,69,0.30)" },
-    { x: pxW * 0.92, y: pxH * 0.1, r: pxW * 0.16, color: "rgba(255,122,89,0.35)" },
-    { x: pxW * 0.85, y: pxH * 0.92, r: pxW * 0.24, color: "rgba(122,45,99,0.45)" },
-    { x: pxW * 0.05, y: pxH * 0.95, r: pxW * 0.14, color: "rgba(255,193,69,0.18)" },
+    { x: pxW * 0.12, y: pxH * 0.2, r: pxW * 0.22, color: "rgba(204,154,61,0.30)" },
+    { x: pxW * 0.92, y: pxH * 0.1, r: pxW * 0.16, color: "rgba(94,203,195,0.35)" },
+    { x: pxW * 0.85, y: pxH * 0.92, r: pxW * 0.24, color: "rgba(177,20,95,0.45)" },
+    { x: pxW * 0.05, y: pxH * 0.95, r: pxW * 0.14, color: "rgba(204,154,61,0.18)" },
   ];
   orbs.forEach((o) => {
     const rg = ctx.createRadialGradient(o.x, o.y, 0, o.x, o.y, o.r);
@@ -1591,17 +1675,19 @@ async function downloadPhotosPptx() {
   if (typeof PptxGenJS === "undefined") return showToast("Still loading — try again in a moment");
   showToast("Building your PowerPoint — this can take a bit for lots of photos…", 6000);
 
-  // Theme colours: a vibrant indigo → berry → coral gradient with gold
-  // accents, painted as actual gradient background images (see
+  // Theme colours: matches the app's own peacock/magenta/gold palette (see
+  // css/styles.css :root and .hero-card) rather than a separate PowerPoint-only
+  // theme, painted as actual gradient background images (see
   // makeDynamicBackgroundDataUrl) rather than flat fills, for a more
   // dynamic, layered look than a plain solid colour.
-  const CORAL = "FF7A55";
-  const CORAL_SOFT = "FFA98C";
-  const GOLD = "FFC145";
-  const GOLD_SOFT = "FFD98C";
-  const CREAM = "FFF6EC";
-  const BLUSH = "FBE9E7";
-  const INK = "2B1F2E";
+  const MAGENTA = "B1145F";
+  const MAGENTA_DEEP = "7C0D44";
+  const PEACOCK_LIGHT = "5ECBC3";
+  const GOLD = "CC9A3D";
+  const GOLD_LIGHT = "F0D78C";
+  const CREAM = "FBF8F2";
+  const CREAM_DEEP = "F2ECDC";
+  const INK = "1C2B29";
   const W = 10,
     H = 5.63; // 16:9
 
@@ -1628,12 +1714,12 @@ async function downloadPhotosPptx() {
     // A scatter of small confetti shapes for a fun, festive feel.
     [
       { x: 0.6, y: 0.65, w: 0.09, h: 0.09, color: GOLD, shape: "ellipse" },
-      { x: 9.15, y: 0.6, w: 0.12, h: 0.05, color: CORAL_SOFT, shape: "rect", rotate: 30 },
-      { x: 0.45, y: 4.85, w: 0.08, h: 0.08, color: CORAL_SOFT, shape: "ellipse" },
+      { x: 9.15, y: 0.6, w: 0.12, h: 0.05, color: PEACOCK_LIGHT, shape: "rect", rotate: 30 },
+      { x: 0.45, y: 4.85, w: 0.08, h: 0.08, color: PEACOCK_LIGHT, shape: "ellipse" },
       { x: 9.35, y: 4.9, w: 0.1, h: 0.1, color: GOLD, shape: "ellipse" },
-      { x: 5.05, y: 0.5, w: 0.11, h: 0.05, color: GOLD_SOFT, shape: "rect", rotate: -20 },
-      { x: 1.6, y: 5.05, w: 0.09, h: 0.09, color: GOLD_SOFT, shape: "ellipse" },
-      { x: 8.3, y: 0.55, w: 0.08, h: 0.08, color: CORAL_SOFT, shape: "ellipse" },
+      { x: 5.05, y: 0.5, w: 0.11, h: 0.05, color: GOLD_LIGHT, shape: "rect", rotate: -20 },
+      { x: 1.6, y: 5.05, w: 0.09, h: 0.09, color: GOLD_LIGHT, shape: "ellipse" },
+      { x: 8.3, y: 0.55, w: 0.08, h: 0.08, color: PEACOCK_LIGHT, shape: "ellipse" },
     ].forEach((c) =>
       groupCloud.addShape(pptx.ShapeType[c.shape], {
         x: c.x, y: c.y, w: c.w, h: c.h, fill: { color: c.color }, line: { type: "none" }, rotate: c.rotate || 0,
@@ -1647,8 +1733,8 @@ async function downloadPhotosPptx() {
     const cloudWords = [
       { text: "ശ്രീ മാരുതി സൈക്ലിംഗ് ക്ലബ്", x: 0.4, y: 1.15, w: 9.2, h: 0.9, fontSize: 30, color: GOLD, rotate: 0 },
       { text: "ടാർണീറ്റ് ബോയ്സ്", x: 0.15, y: 2.15, w: 4.3, h: 0.75, fontSize: 25, color: "FFFFFF", rotate: -7 },
-      { text: "ജിം ബോയ്സ്", x: 6.9, y: 2.05, w: 2.9, h: 0.75, fontSize: 26, color: CORAL_SOFT, rotate: 6 },
-      { text: "വിൻഡാം ക്യാമ്പേഴ്സ്", x: 0.75, y: 3.15, w: 4.0, h: 0.75, fontSize: 24, color: GOLD_SOFT, rotate: 5 },
+      { text: "ജിം ബോയ്സ്", x: 6.9, y: 2.05, w: 2.9, h: 0.75, fontSize: 26, color: PEACOCK_LIGHT, rotate: 6 },
+      { text: "വിൻഡാം ക്യാമ്പേഴ്സ്", x: 0.75, y: 3.15, w: 4.0, h: 0.75, fontSize: 24, color: GOLD_LIGHT, rotate: 5 },
       { text: "വിൻഡാം ഫിഷിംഗ്", x: 5.5, y: 3.2, w: 3.7, h: 0.75, fontSize: 24, color: CREAM, rotate: -6 },
       { text: "ടാർണീറ്റ് ബൈക്കീസ്", x: 2.6, y: 4.15, w: 4.6, h: 0.7, fontSize: 25, color: "FFFFFF", rotate: 3 },
     ];
@@ -1659,7 +1745,7 @@ async function downloadPhotosPptx() {
       })
     );
     groupCloud.addText(eventInfo.eventName || "Family Get-Together", {
-      x: 0.5, y: H - 0.65, w: W - 1, h: 0.3, align: "center", fontSize: 10, italic: true, color: GOLD_SOFT,
+      x: 0.5, y: H - 0.65, w: W - 1, h: 0.3, align: "center", fontSize: 10, italic: true, color: GOLD_LIGHT,
     });
 
     // ---------- Title slide ----------
@@ -1680,7 +1766,7 @@ async function downloadPhotosPptx() {
       .join("   ·   ");
     title.addText(dateVenueLine, { x: 0.5, y: 3.05, w: W - 1, h: 0.5, align: "center", fontSize: 15, color: GOLD });
     title.addText(`📸 ${photos.length} photo${photos.length === 1 ? "" : "s"} shared by the family`, {
-      x: 0.5, y: 3.6, w: W - 1, h: 0.5, align: "center", fontSize: 13, italic: true, color: GOLD_SOFT,
+      x: 0.5, y: 3.6, w: W - 1, h: 0.5, align: "center", fontSize: 13, italic: true, color: GOLD_LIGHT,
     });
 
     // Highlights (liked photos) first, so the deck opens with its best moments.
@@ -1700,18 +1786,18 @@ async function downloadPhotosPptx() {
         continue;
       }
       const slide = pptx.addSlide();
-      slide.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: W, h: H, fill: { color: i % 2 === 0 ? BLUSH : CREAM }, line: { type: "none" } });
-      // Colour-accented frame: a coral backdrop peeking out from behind a
+      slide.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: W, h: H, fill: { color: i % 2 === 0 ? CREAM_DEEP : CREAM }, line: { type: "none" } });
+      // Colour-accented frame: a magenta backdrop peeking out from behind a
       // white photo card, for a layered, dynamic card look with real depth.
       slide.addShape(pptx.ShapeType.rect, {
         x: 0.47, y: 0.32, w: W - 0.94, h: 4.76,
-        fill: { color: CORAL }, line: { type: "none" },
+        fill: { color: MAGENTA }, line: { type: "none" },
       });
       slide.addShape(pptx.ShapeType.rect, {
         x: 0.55, y: 0.4, w: W - 1.1, h: 4.6,
         fill: { color: "FFFFFF" },
         line: { color: GOLD, width: 1.5 },
-        shadow: { type: "outer", color: "241B3D", opacity: 0.35, blur: 8, offset: 3, angle: 90 },
+        shadow: { type: "outer", color: "0A5C59", opacity: 0.35, blur: 8, offset: 3, angle: 90 },
       });
       // b64 is already scaled to fit within this exact box (letterboxed in
       // white, never cropped), so no "sizing" is needed here — that avoids
@@ -1719,7 +1805,7 @@ async function downloadPhotosPptx() {
       slide.addImage({ data: b64, x: 0.75, y: 0.6, w: W - 1.5, h: 4.15 });
       const likeCount = (p.likedBy || []).length;
       if (likeCount > 0) {
-        slide.addShape(pptx.ShapeType.roundRect, { x: W - 1.85, y: 0.5, w: 1.1, h: 0.38, fill: { color: CORAL }, line: { type: "none" }, rectRadius: 0.1 });
+        slide.addShape(pptx.ShapeType.roundRect, { x: W - 1.85, y: 0.5, w: 1.1, h: 0.38, fill: { color: MAGENTA }, line: { type: "none" }, rectRadius: 0.1 });
         slide.addText("🌟 Highlight", { x: W - 1.85, y: 0.5, w: 1.1, h: 0.38, align: "center", valign: "middle", fontSize: 9, bold: true, color: "FFFFFF" });
       }
       slide.addText(`${eventInfo.eventName || "Family Get-Together"}   ·   ${i}/${ordered.length}`, {
@@ -1728,13 +1814,45 @@ async function downloadPhotosPptx() {
     }
 
     // ---------- Closing slide ----------
+    // Echoes the opening word-cloud slide (confetti scatter, Malayalam text,
+    // same gold/gradient palette) rather than a generic plain "Thank You" —
+    // and recaps the date/venue/photo count so it feels like a proper
+    // bookend rather than an afterthought.
     const closing = pptx.addSlide();
     fullBleed(closing);
     accentLines(closing);
-    closing.addText("🎉", { x: 0, y: 1.4, w: W, h: 1, align: "center", fontSize: 50 });
-    closing.addText("Thank You!", { x: 0.5, y: 2.4, w: W - 1, h: 0.9, align: "center", fontSize: 36, bold: true, color: "FFFFFF", fontFace: "Georgia" });
-    closing.addText("For celebrating with us", { x: 0.5, y: 3.2, w: W - 1, h: 0.5, align: "center", fontSize: 16, italic: true, color: GOLD });
-    closing.addText("Made with ❤️ by the family committee", { x: 0.5, y: 4.5, w: W - 1, h: 0.4, align: "center", fontSize: 11, color: GOLD_SOFT });
+    [
+      { x: 0.6, y: 0.55, w: 0.1, h: 0.1, color: GOLD, shape: "ellipse" },
+      { x: 9.2, y: 0.5, w: 0.09, h: 0.09, color: PEACOCK_LIGHT, shape: "ellipse" },
+      { x: 5.0, y: 0.45, w: 0.12, h: 0.05, color: GOLD_LIGHT, shape: "rect", rotate: -18 },
+      { x: 0.5, y: 4.95, w: 0.1, h: 0.05, color: GOLD_LIGHT, shape: "rect", rotate: 22 },
+      { x: 9.3, y: 5.0, w: 0.09, h: 0.09, color: PEACOCK_LIGHT, shape: "ellipse" },
+      { x: 1.5, y: 5.1, w: 0.08, h: 0.08, color: GOLD, shape: "ellipse" },
+      { x: 8.4, y: 0.55, w: 0.08, h: 0.08, color: GOLD, shape: "ellipse" },
+    ].forEach((c) =>
+      closing.addShape(pptx.ShapeType[c.shape], {
+        x: c.x, y: c.y, w: c.w, h: c.h, fill: { color: c.color }, line: { type: "none" }, rotate: c.rotate || 0,
+      })
+    );
+    closing.addText("🎉", { x: 0, y: 0.65, w: W, h: 0.85, align: "center", fontSize: 44 });
+    closing.addText("നന്ദി", {
+      x: 0, y: 1.5, w: W, h: 0.65, align: "center", fontSize: 30, bold: true, color: GOLD, fontFace: MALAYALAM_FONT,
+    });
+    closing.addText("Thank You!", {
+      x: 0.5, y: 2.15, w: W - 1, h: 0.75, align: "center", fontSize: 34, bold: true, color: "FFFFFF", fontFace: "Georgia",
+    });
+    closing.addText(`For celebrating ${eventInfo.eventName || "our get-together"} with us`, {
+      x: 0.5, y: 2.9, w: W - 1, h: 0.45, align: "center", fontSize: 15, italic: true, color: GOLD_LIGHT,
+    });
+    if (dateVenueLine) {
+      closing.addText(dateVenueLine, { x: 0.5, y: 3.45, w: W - 1, h: 0.4, align: "center", fontSize: 12, color: CREAM });
+    }
+    closing.addText("Until the next get-together! 🎊", {
+      x: 0.5, y: 4.0, w: W - 1, h: 0.4, align: "center", fontSize: 12, italic: true, color: GOLD_LIGHT,
+    });
+    closing.addText("Made with ❤️ by the family committee", {
+      x: 0.5, y: H - 0.5, w: W - 1, h: 0.35, align: "center", fontSize: 10, color: GOLD_LIGHT,
+    });
 
     if (failCount > 0 && failCount === ordered.length) {
       // Every single photo failed to load — almost always a Firebase Storage
