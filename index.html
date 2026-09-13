@@ -19,6 +19,8 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" defer></script>
 <!-- PptxGenJS for the "Export as PowerPoint" photo showcase -->
 <script src="https://cdn.jsdelivr.net/npm/pptxgenjs@4.0.1/dist/pptxgen.bundle.js" defer></script>
+<!-- jsPDF for the "Keepsake PDF" export -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" defer></script>
 
 <link rel="stylesheet" href="css/styles.css" />
 </head>
@@ -52,7 +54,10 @@
           <p id="eventSubDisplay" class="brand-sub">Plan it together</p>
         </div>
       </div>
-      <button id="settingsBtn" class="icon-btn" title="Event settings" aria-label="Event settings">⚙️</button>
+      <div class="topbar-actions">
+        <button id="themeToggleBtn" class="icon-btn" title="Toggle dark mode" aria-label="Toggle dark mode">🌙</button>
+        <button id="settingsBtn" class="icon-btn" title="Event settings" aria-label="Event settings">⚙️</button>
+      </div>
     </div>
 
     <nav class="tabs" role="tablist" aria-label="Sections">
@@ -214,18 +219,10 @@
         <span>Show confirmed guests only (affects the totals above and catering cost splits)</span>
       </label>
 
-      <div class="two-col">
-        <div class="card" id="dietaryCard">
-          <h3>🥗 Dietary &amp; allergies</h3>
-          <div id="dietaryRollup" class="dietary-rollup">
-            <p class="muted">Add attendees with dietary notes to see a summary here.</p>
-          </div>
-        </div>
-        <div class="card" id="seatingCard">
-          <h3>🪑 Seating overview</h3>
-          <div id="seatingOverview" class="seating-overview">
-            <p class="muted">Assign tables when adding attendees to see the layout here.</p>
-          </div>
+      <div class="card" id="dietaryCard">
+        <h3>🥗 Dietary &amp; allergies</h3>
+        <div id="dietaryRollup" class="dietary-rollup">
+          <p class="muted">Add attendees with dietary notes to see a summary here.</p>
         </div>
       </div>
 
@@ -296,6 +293,9 @@
           <p class="muted" style="margin-bottom:10px">Split fairly by catering headcount (adult = 1, kid 5–12 = 0.5, kid &lt;5 = free).</p>
           <div class="cost-split-summary" id="costSplitSummary">Add attendees and expenses to calculate shares.</div>
           <div id="costSplitList" class="cost-split-list"></div>
+          <div class="cost-split-actions">
+            <button class="btn btn-ghost" id="shareCostSplitBtn">📤 Share summary</button>
+          </div>
         </div>
       </details>
 
@@ -353,6 +353,7 @@
           <button class="btn btn-ghost" id="photoWallBtn">📺 Photo Wall (TV)</button>
           <button class="btn btn-ghost" id="downloadAllBtn">⬇️ Download all (ZIP)</button>
           <button class="btn btn-ghost" id="downloadPptxBtn">📊 Export PowerPoint</button>
+          <button class="btn btn-ghost" id="downloadKeepsakeBtn">📖 Keepsake PDF</button>
           <label class="btn btn-primary file-btn">
             📤 Upload photos
             <input type="file" id="photoInput" accept="image/*" multiple hidden />
@@ -384,6 +385,30 @@
           <button class="btn btn-primary" id="addGameBtn">➕ Add your own</button>
         </div>
       </div>
+
+      <details class="card collapsible-card" id="scoreboardCard">
+        <summary class="collapsible-summary">
+          <h3>🏆 Teams &amp; scoreboard</h3>
+          <span class="collapsible-chevron" aria-hidden="true">▾</span>
+        </summary>
+        <div class="collapsible-body">
+          <p class="muted" style="margin-bottom:10px">Split into fair teams for group games, then keep score live — everyone watching sees updates instantly.</p>
+          <div class="scoreboard-controls">
+            <label class="field-label" style="margin:0">Teams</label>
+            <input type="number" id="teamCount" class="input" min="2" max="10" value="2" />
+            <button class="btn btn-ghost" id="shuffleTeamsBtn">🔀 Shuffle from attendees</button>
+            <button class="btn btn-ghost" id="resetScoresBtn">↺ Reset scores</button>
+            <button class="btn btn-ghost" id="clearTeamsBtn">🗑️ Clear teams</button>
+          </div>
+          <div id="scoreboardList" class="scoreboard-list">
+            <p class="muted">No teams yet — shuffle to create some, or add a team manually below.</p>
+          </div>
+          <form id="addTeamForm" class="inline-form">
+            <input type="text" id="addTeamInput" class="input" placeholder="Add a team name manually…" />
+            <button type="submit" class="btn btn-primary">Add team</button>
+          </form>
+        </div>
+      </details>
 
       <div class="filter-chips" id="gameFilterChips">
         <button class="chip active" data-filter="all">All</button>
