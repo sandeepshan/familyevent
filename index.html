@@ -21,6 +21,8 @@
 <script src="https://cdn.jsdelivr.net/npm/pptxgenjs@4.0.1/dist/pptxgen.bundle.js" defer></script>
 <!-- jsPDF for the "Keepsake PDF" export -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" defer></script>
+<!-- SheetJS for the "Export Excel" budget workbook -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
 
 <link rel="stylesheet" href="css/styles.css" />
 </head>
@@ -305,6 +307,7 @@
             <option value="">All categories</option>
           </select>
           <button class="btn btn-ghost" id="exportBudgetBtn">⬇️ Export CSV</button>
+          <button class="btn btn-primary" id="exportBudgetExcelBtn">📊 Export Excel</button>
         </div>
         <div class="table-wrap">
           <table class="data-table" id="budgetTable">
