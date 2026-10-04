@@ -572,40 +572,66 @@ label.field-label { font-size: 0.78rem; font-weight: 700; color: var(--ink-soft)
 .dietary-tag { background: var(--cream-deep); color: var(--magenta-deep); font-size: 0.8rem; font-weight: 700; padding: 6px 12px; border-radius: 100px; display: inline-flex; align-items: center; gap: 6px; }
 .dietary-tag .count { background: var(--peacock); color: var(--white); border-radius: 100px; padding: 1px 7px; font-size: 0.72rem; }
 
-/* ---------- Cost split ---------- */
-.cost-split-summary { background: var(--cream-deep); border-radius: var(--radius-sm); padding: 10px 14px; font-weight: 700; font-size: 0.88rem; margin-bottom: 12px; }
-.cost-split-list { display: flex; flex-direction: column; gap: 8px; }
-.cost-split-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 4px; border-bottom: 1px solid var(--line); font-size: 0.86rem; }
-.cost-split-row:last-child { border-bottom: none; }
-.cost-split-name { font-weight: 700; }
-.cost-split-share { color: var(--ink-soft); font-size: 0.78rem; }
-.cost-split-credit { color: var(--peacock-dark); font-size: 0.76rem; margin-top: 2px; }
-.cost-split-row-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
-.cost-split-actions { margin-top: 12px; text-align: right; }
 .paid-checkbox-label { display: flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 700; font-size: 0.82rem; white-space: nowrap; }
 .paid-checkbox-label input { width: 17px; height: 17px; accent-color: var(--green); cursor: pointer; }
 .done-checkbox-label { display: flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 700; font-size: 0.82rem; white-space: nowrap; }
 .done-checkbox-label input { width: 17px; height: 17px; accent-color: var(--green); cursor: pointer; }
-
-/* ---------- Reimbursements ---------- */
-.reimburse-group { margin-bottom: 16px; }
-.reimburse-group:last-child { margin-bottom: 0; }
-.reimburse-group-head { display: flex; align-items: center; justify-content: space-between; padding: 4px 4px 2px; font-size: 0.88rem; }
-.reimburse-group-owed { color: var(--red); font-weight: 700; font-size: 0.82rem; }
 tr.row-done td { opacity: 0.6; }
 .oop-badge { display: inline-block; font-size: 0.82rem; margin-left: 2px; cursor: help; }
 .strikethrough { text-decoration: line-through; }
 .actual-price-input { width: 100px; padding: 6px 8px; font-size: 0.85rem; }
 
+/* ---------- Budget tab (condensed summary card) ---------- */
+.budget-stats-row { margin-bottom: 14px; }
+.budget-category-head { margin: 4px 0 10px; }
+.budget-category-head h3 { margin: 0; font-size: 0.95rem; }
+.budget-report-hint { font-size: 0.82rem; margin: -6px 0 16px; }
+
 /* ---------- Report tab ---------- */
 .report-intro { margin-top: -6px; margin-bottom: 14px; font-size: 0.86rem; }
 .report-card-title { margin: 0 0 10px; }
+.report-legend { margin: -4px 0 12px; font-size: 0.82rem; }
 .report-explainer { font-size: 0.86rem; line-height: 1.6; color: var(--ink-soft); }
 .report-explainer strong { color: var(--ink); }
+.report-progress-note { color: var(--ink-soft); font-size: 0.8rem; margin-top: 6px; }
+.report-formula {
+  text-align: center;
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+  font-weight: 700;
+  background: var(--cream-deep);
+  border-radius: var(--radius-sm);
+  padding: 14px 10px;
+  margin-bottom: 12px;
+}
+.report-formula-op { color: var(--ink-soft); font-weight: 400; margin: 0 4px; }
 .status-pill { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 0.76rem; font-weight: 700; white-space: nowrap; }
 .status-pill.good { background: rgba(46, 160, 110, 0.15); color: var(--green); }
 .status-pill.bad { background: rgba(216, 70, 70, 0.12); color: var(--red); }
 .report-footer { text-align: center; font-size: 0.78rem; margin-top: 4px; }
+.good-value { color: var(--green); }
+.warn-value { color: var(--red); }
+
+.person-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  color: var(--white);
+  font-size: 0.68rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.report-name-cell { display: inline-flex; align-items: center; gap: 8px; }
+.report-cell-stack { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.report-amount { font-weight: 700; }
+#reportLedgerTable tr.report-row-pending { border-left: 3px solid var(--red); }
+#reportLedgerTable tr.report-row-settled { border-left: 3px solid var(--green); opacity: 0.85; }
+@media (max-width: 720px) {
+  .report-cell-stack { align-items: flex-end; }
+}
 
 /* ---------- Category cap bar ---------- */
 .category-row.over-cap .cat-bar-fill { background: linear-gradient(90deg, var(--red), var(--magenta-deep)); }
