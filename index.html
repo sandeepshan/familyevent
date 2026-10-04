@@ -66,6 +66,7 @@
       <button class="tab-btn active" data-tab="dashboard" role="tab" aria-selected="true">🏠 <span>Home</span></button>
       <button class="tab-btn" data-tab="attendees" role="tab" aria-selected="false">👨‍👩‍👧‍👦 <span>Attendees</span></button>
       <button class="tab-btn" data-tab="budget" role="tab" aria-selected="false">🧾 <span>Budget</span></button>
+      <button class="tab-btn" data-tab="report" role="tab" aria-selected="false">📊 <span>Report</span></button>
       <button class="tab-btn" data-tab="schedule" role="tab" aria-selected="false">🗓️ <span>Schedule</span></button>
       <button class="tab-btn" data-tab="photos" role="tab" aria-selected="false">📸 <span>Photos</span></button>
       <button class="tab-btn" data-tab="games" role="tab" aria-selected="false">🎉 <span>Games</span></button>
@@ -341,6 +342,69 @@
           </table>
         </div>
       </div>
+    </section>
+
+    <!-- ============ REPORT ============ -->
+    <section id="tab-report" class="tab-panel">
+      <div class="panel-head">
+        <h2>📊 Budget report</h2>
+        <button class="btn btn-primary" id="reportExportExcelBtn">⬇️ Download Excel</button>
+      </div>
+      <p class="muted report-intro">A live, always-current view of the same numbers as the Excel export — bookmark or share this tab with the committee instead of a file that goes out of date.</p>
+
+      <div class="grid stats-grid compact">
+        <div class="stat-card highlight"><div class="stat-label">Total expenses</div><div class="stat-value" id="reportGrandTotal">$0</div></div>
+        <div class="stat-card"><div class="stat-label">Catering heads</div><div class="stat-value" id="reportHeads">0</div></div>
+        <div class="stat-card"><div class="stat-label">Cost / catering head</div><div class="stat-value" id="reportPerHead">$0</div></div>
+        <div class="stat-card"><div class="stat-label">Collected from families</div><div class="stat-value" id="reportCollected">$0</div></div>
+        <div class="stat-card"><div class="stat-label">Still outstanding</div><div class="stat-value" id="reportOutstanding">$0</div></div>
+        <div class="stat-card"><div class="stat-label">Owed to committee</div><div class="stat-value" id="reportOwedCommittee">$0</div></div>
+      </div>
+
+      <div class="card" id="reportMathCard">
+        <h3 class="report-card-title">How the per-head cost works</h3>
+        <div id="reportMathExplainer" class="report-explainer"></div>
+      </div>
+
+      <div class="card">
+        <h3 class="report-card-title">By category</h3>
+        <div id="reportCategoryBreakdown" class="category-breakdown"></div>
+      </div>
+
+      <div class="card">
+        <h3 class="report-card-title">🤝 Who owes what</h3>
+        <div class="cost-split-summary" id="reportCostSplitSummary">Add attendees and expenses to calculate shares.</div>
+        <div id="reportCostSplitList" class="cost-split-list"></div>
+      </div>
+
+      <div class="card">
+        <h3 class="report-card-title">💳 Owed to committee</h3>
+        <div class="cost-split-summary" id="reportReimbursementsSummary">No reimbursements to track yet.</div>
+        <div id="reportReimbursementsList" class="cost-split-list"></div>
+      </div>
+
+      <div class="card table-card">
+        <h3 class="report-card-title">🧾 Full expense ledger</h3>
+        <div class="table-wrap">
+          <table class="data-table" id="reportExpenseTable">
+            <thead>
+              <tr>
+                <th>Item</th>
+                <th>Category</th>
+                <th>Estimated</th>
+                <th>Actual</th>
+                <th>Assigned to</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="reportExpenseTableBody">
+              <tr class="empty-row"><td colspan="6">No expenses yet.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <p class="muted report-footer" id="reportUpdatedAt"></p>
     </section>
 
     <!-- ============ SCHEDULE ============ -->
