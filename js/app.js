@@ -784,7 +784,18 @@ const BUDGET_CATEGORIES = [
   "Photography & Printing",
   "Miscellaneous",
 ];
-const COMMITTEE_MEMBERS = ["Binoy", "Hans", "Manoj", "Joban", "Sojan", "Martin", "Sandeep"];
+// Full names (not first names) so a committee member who's also an
+// attending family can be matched exactly against that family's name on
+// the Attendees tab — see reimbursementCredit() below.
+const COMMITTEE_MEMBERS = [
+  "Sandeep Shankar",
+  "Hans Francis",
+  "Joban Varkey",
+  "Binoy Joseph",
+  "Martin Kolattukudy",
+  "Sojan Varghese",
+  "Manoj Koova",
+];
 const CATEGORY_ICONS = {
   "Catering & Food": "🍛",
   "Water & Beverages": "💧",
@@ -815,6 +826,17 @@ function budgetItemPaidOOP(b) {
 }
 function budgetItemReimbursed(b) {
   return b.reimbursed === true;
+}
+// When a committee member is also an attending family, nets their
+// outstanding reimbursement against their own catering share — matched by
+// exact name (case-insensitive) between "Assigned to" and the attendee's
+// family name, so both lists should use the same full names.
+function reimbursementCredit(familyName) {
+  if (!familyName) return 0;
+  const key = familyName.trim().toLowerCase();
+  return budgetItems
+    .filter((b) => budgetItemPaidOOP(b) && !budgetItemReimbursed(b) && (b.assignedTo || "").trim().toLowerCase() === key)
+    .reduce((s, b) => s + budgetItemTotal(b), 0);
 }
 
 function initBudget() {
@@ -995,13 +1017,22 @@ function renderCostSplit() {
   listEl.innerHTML = statsSource
     .map((a) => {
       const w = cateringWeight(a);
-      const share = w * perHead;
-      const waHref = costSplitWhatsappHref(a, share, w, perHead);
+      const grossShare = w * perHead;
+      const credit = reimbursementCredit(a.familyName);
+      const netShare = grossShare - credit;
+      const waHref = costSplitWhatsappHref(a, netShare, w, perHead, credit);
+      const creditLine =
+        credit > 0
+          ? `<div class="cost-split-credit">− ${fmtMoney(credit)} already covered for expenses → <strong>${
+              netShare >= 0 ? fmtMoney(netShare) + " net due" : fmtMoney(-netShare) + " owed back to them"
+            }</strong></div>`
+          : "";
       return `
     <div class="cost-split-row">
       <div>
         <div class="cost-split-name">${escapeHtml(a.familyName)}</div>
-        <div class="cost-split-share">${formatWeight(w)} heads · ${fmtMoney(share)}</div>
+        <div class="cost-split-share">${formatWeight(w)} heads · ${fmtMoney(grossShare)}</div>
+        ${creditLine}
       </div>
       <div class="cost-split-row-actions">
         ${waHref ? `<a class="icon-action" href="${waHref}" target="_blank" rel="noopener" title="Send amount due via WhatsApp">💬</a>` : ""}
@@ -1186,18 +1217,24 @@ function buildCostSplitCardCanvas(statsSource, grand, perHead) {
       ctx.stroke();
     }
     const w = cateringWeight(a);
-    const share = w * perHead;
+    const grossShare = w * perHead;
+    const credit = reimbursementCredit(a.familyName);
+    const netShare = grossShare - credit;
     ctx.fillStyle = "#1c2b29";
     ctx.font = "700 30px Inter, sans-serif";
     ctx.fillText(a.familyName, cardX + 32, y + 40);
     ctx.font = "500 20px Inter, sans-serif";
     ctx.fillStyle = "#586b67";
-    ctx.fillText(`${formatWeight(w)} heads`, cardX + 32, y + 68);
+    ctx.fillText(
+      credit > 0 ? `${formatWeight(w)} heads · ${fmtMoney(credit)} credit applied` : `${formatWeight(w)} heads`,
+      cardX + 32,
+      y + 68
+    );
 
     ctx.textAlign = "right";
     ctx.font = "800 32px Inter, sans-serif";
     ctx.fillStyle = "#7c0d44";
-    ctx.fillText(fmtMoney(share), cardX + cardW - 32, y + 40);
+    ctx.fillText(fmtMoney(netShare), cardX + cardW - 32, y + 40);
     ctx.font = "700 20px Inter, sans-serif";
     ctx.fillStyle = a.paid ? "#2f8f63" : "#c0392b";
     ctx.fillText(a.paid ? "✅ Paid" : "Unpaid", cardX + cardW - 32, y + 68);
@@ -1468,20 +1505,28 @@ function exportBudgetExcel() {
   }
   XLSX.utils.book_append_sheet(wb, wsCats, "By category");
 
-  // ---- Who owes what: each family's exact share ----
-  const owesHeader = ["Family", "Catering heads", `Share (${cur})`, "Paid?"];
+  // ---- Who owes what: each family's exact share, netted against any
+  // reimbursement credit if that family is also a committee member who
+  // paid for expenses out of pocket ----
+  const owesHeader = ["Family", "Catering heads", `Share (${cur})`, `Credit (${cur})`, `Net due (${cur})`, "Paid?"];
   const owesAoa = [owesHeader];
+  let totalCredit = 0;
   statsSource.forEach((a) => {
     const w = cateringWeight(a);
-    owesAoa.push([a.familyName || "", w, w * perHead, a.paid ? "Yes" : "No"]);
+    const grossShare = w * perHead;
+    const credit = reimbursementCredit(a.familyName);
+    totalCredit += credit;
+    owesAoa.push([a.familyName || "", w, grossShare, credit, grossShare - credit, a.paid ? "Yes" : "No"]);
   });
   owesAoa.push([]);
-  owesAoa.push(["TOTAL", t.cateringHeads, grand, ""]);
+  owesAoa.push(["TOTAL", t.cateringHeads, grand, totalCredit, grand - totalCredit, ""]);
   const wsOwes = XLSX.utils.aoa_to_sheet(owesAoa);
-  wsOwes["!cols"] = [{ wch: 24 }, { wch: 15 }, { wch: 13 }, { wch: 8 }];
+  wsOwes["!cols"] = [{ wch: 24 }, { wch: 15 }, { wch: 13 }, { wch: 13 }, { wch: 13 }, { wch: 8 }];
   for (let r = 1; r < owesAoa.length; r++) {
-    const ref = XLSX.utils.encode_cell({ r, c: 2 });
-    if (wsOwes[ref] && typeof wsOwes[ref].v === "number") wsOwes[ref].z = curFmt;
+    [2, 3, 4].forEach((c) => {
+      const ref = XLSX.utils.encode_cell({ r, c });
+      if (wsOwes[ref] && typeof wsOwes[ref].v === "number") wsOwes[ref].z = curFmt;
+    });
   }
   XLSX.utils.book_append_sheet(wb, wsOwes, "Who owes what");
 
@@ -3717,28 +3762,36 @@ function attendeeWhatsappHref(a) {
 // list — distinct from the general event reminder above. Includes the
 // optional payment note (UPI/bank/PayID etc.) from Settings when set, so
 // a family can pay straight from the message without asking the committee
-// how.
-function costSplitMessageText(a, share, w, perHead) {
+// how. `credit` is any outstanding reimbursement netted off because this
+// family is also a committee member who paid for expenses themselves —
+// see reimbursementCredit().
+function costSplitMessageText(a, netShare, w, perHead, credit) {
   const name = eventInfo.eventName || "our get-together";
   const start = eventStartDateTime();
   const dateStr = start
     ? start.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })
     : "";
+  const grossShare = w * perHead;
   let msg = `Hi ${a.familyName}! For ${name}`;
   if (dateStr) msg += ` on ${dateStr}`;
-  msg += `, your family's share comes to ${fmtMoney(share)} (${formatWeight(w)} catering head${
+  msg += `, your family's share is ${fmtMoney(grossShare)} (${formatWeight(w)} catering head${
     w === 1 ? "" : "s"
   } × ${fmtMoney(perHead)}/head).`;
-  if (eventInfo.paymentNote && eventInfo.paymentNote.trim()) msg += ` ${eventInfo.paymentNote.trim()}`;
+  if (credit > 0) {
+    msg += ` After the ${fmtMoney(credit)} you've already covered for expenses, that leaves ${
+      netShare >= 0 ? fmtMoney(netShare) + " still to pay" : fmtMoney(-netShare) + " owed back to you"
+    }.`;
+  }
+  if (netShare > 0 && eventInfo.paymentNote && eventInfo.paymentNote.trim()) msg += ` ${eventInfo.paymentNote.trim()}`;
   msg += " Thank you! 🙏";
   return msg;
 }
 
-function costSplitWhatsappHref(a, share, w, perHead) {
+function costSplitWhatsappHref(a, netShare, w, perHead, credit) {
   if (!a || !a.phone) return "";
   const digits = a.phone.replace(/[^\d+]/g, "").replace(/^\+/, "");
   if (!digits) return "";
-  const text = encodeURIComponent(costSplitMessageText(a, share, w, perHead));
+  const text = encodeURIComponent(costSplitMessageText(a, netShare, w, perHead, credit));
   return `https://wa.me/${digits}?text=${text}`;
 }
 
