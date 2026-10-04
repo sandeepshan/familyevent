@@ -879,6 +879,7 @@ function initBudget() {
   $("#exportBudgetExcelBtn").addEventListener("click", exportBudgetExcel);
   $("#setCapsBtn").addEventListener("click", openCategoryCapsModal);
   $("#shareCostSplitBtn").addEventListener("click", shareCostSplitCard);
+  $("#reportExportExcelBtn")?.addEventListener("click", exportBudgetExcel);
 }
 
 function openCategoryCapsModal() {
@@ -938,35 +939,11 @@ function renderBudget() {
   $("#budgetPerPerson").textContent = t.cateringHeads > 0 ? fmtMoney(grand / t.cateringHeads) : "—";
 
   // Category breakdown
-  const byCat = {};
-  budgetItems.forEach((b) => {
-    const cat = b.category || "Miscellaneous";
-    byCat[cat] = (byCat[cat] || 0) + budgetItemTotal(b);
-  });
-  const breakdownEl = $("#categoryBreakdown");
-  const catEntries = Object.entries(byCat).sort((a, b) => b[1] - a[1]);
-  if (!catEntries.length) {
-    breakdownEl.innerHTML = `<p class="muted">Add expenses to see the breakdown.</p>`;
-  } else {
-    const max = Math.max(...catEntries.map((e) => e[1]), 1);
-    breakdownEl.innerHTML = catEntries
-      .map(([cat, amt]) => {
-        const cap = (eventInfo.categoryCaps && eventInfo.categoryCaps[cat]) || 0;
-        const overCap = cap > 0 && amt > cap;
-        const barPct = cap > 0 ? Math.min(100, (amt / cap) * 100) : (amt / max) * 100;
-        const capNote = cap > 0 ? `<div class="cat-cap-note">${overCap ? "⚠️ " + fmtMoney(amt - cap) + " over" : "of " + fmtMoney(cap)}</div>` : "";
-        return `
-      <div class="category-row ${overCap ? "over-cap" : ""}">
-        <span class="cat-name">${CATEGORY_ICONS[cat] || "📦"} ${escapeHtml(cat)}</span>
-        <span class="cat-bar-track"><span class="cat-bar-fill" style="width:${barPct}%"></span></span>
-        <span class="cat-amount">${fmtMoney(amt)}${capNote}</span>
-      </div>`;
-      })
-      .join("");
-  }
+  $("#categoryBreakdown").innerHTML = buildCategoryBreakdownHtml();
 
   renderCostSplit();
   renderReimbursements();
+  renderReport();
 
   const body = $("#budgetTableBody");
   if (!filtered.length) {
@@ -1155,6 +1132,211 @@ function renderReimbursements() {
       });
     });
   });
+}
+
+// Shared by the Budget tab's own category card and the read-only Report tab
+// below, so the two never drift out of sync.
+function buildCategoryBreakdownHtml() {
+  const byCat = {};
+  budgetItems.forEach((b) => {
+    const cat = b.category || "Miscellaneous";
+    byCat[cat] = (byCat[cat] || 0) + budgetItemTotal(b);
+  });
+  const catEntries = Object.entries(byCat).sort((a, b) => b[1] - a[1]);
+  if (!catEntries.length) return `<p class="muted">Add expenses to see the breakdown.</p>`;
+  const max = Math.max(...catEntries.map((e) => e[1]), 1);
+  return catEntries
+    .map(([cat, amt]) => {
+      const cap = (eventInfo.categoryCaps && eventInfo.categoryCaps[cat]) || 0;
+      const overCap = cap > 0 && amt > cap;
+      const barPct = cap > 0 ? Math.min(100, (amt / cap) * 100) : (amt / max) * 100;
+      const capNote = cap > 0 ? `<div class="cat-cap-note">${overCap ? "⚠️ " + fmtMoney(amt - cap) + " over" : "of " + fmtMoney(cap)}</div>` : "";
+      return `
+    <div class="category-row ${overCap ? "over-cap" : ""}">
+      <span class="cat-name">${CATEGORY_ICONS[cat] || "📦"} ${escapeHtml(cat)}</span>
+      <span class="cat-bar-track"><span class="cat-bar-fill" style="width:${barPct}%"></span></span>
+      <span class="cat-amount">${fmtMoney(amt)}${capNote}</span>
+    </div>`;
+    })
+    .join("");
+}
+
+// =============================================================================
+// REPORT TAB — a read-only, always-current mirror of the Excel export, built
+// right into the app so every committee member can check the numbers without
+// downloading a file. Reuses the exact same figures as the Budget tab and
+// the Excel export, just presented as plain status pills instead of
+// editable checkboxes/inputs.
+// =============================================================================
+function renderReport() {
+  if (!$("#tab-report")) return;
+
+  const grand = budgetGrandTotal(budgetItems);
+  const grandEstimated = budgetItems.reduce((s, b) => s + budgetItemEstimated(b), 0);
+  const statsSource = confirmedOnly() ? attendees.filter((a) => a.rsvp === "Confirmed") : attendees;
+  const t = attendeeTotals(statsSource);
+  const perHead = t.cateringHeads > 0 ? grand / t.cateringHeads : 0;
+
+  $("#reportGrandTotal").textContent = fmtMoney(grand);
+  $("#reportHeads").textContent = formatWeight(t.cateringHeads);
+  $("#reportPerHead").textContent = t.cateringHeads > 0 ? fmtMoney(perHead) : "—";
+
+  let collected = 0;
+  let outstanding = 0;
+  statsSource.forEach((a) => {
+    const netShare = cateringWeight(a) * perHead - reimbursementCredit(a.familyName);
+    if (a.paid) collected += netShare;
+    else outstanding += netShare;
+  });
+  $("#reportCollected").textContent = fmtMoney(collected);
+  $("#reportOutstanding").textContent = fmtMoney(outstanding);
+
+  const oopItems = budgetItems.filter((b) => budgetItemPaidOOP(b));
+  const owedCommittee = oopItems.filter((b) => !budgetItemReimbursed(b)).reduce((s, b) => s + budgetItemTotal(b), 0);
+  $("#reportOwedCommittee").textContent = fmtMoney(owedCommittee);
+
+  const doneCount = budgetItems.filter((b) => budgetItemDone(b)).length;
+  const variance =
+    grandEstimated !== grand
+      ? `<p>Estimated expenses came to ${fmtMoney(grandEstimated)} — the actual total is ${fmtMoney(Math.abs(grand - grandEstimated))} ${
+          grand > grandEstimated ? "higher" : "lower"
+        } now that real purchase prices have come in.</p>`
+      : "";
+  $("#reportMathExplainer").innerHTML = budgetItems.length
+    ? `
+    <p>Each adult counts as 1 catering head, each kid aged 5–12 as 0.5, and kids under 5 are free.</p>
+    <p>Cost per head = total expenses ÷ total weighted catering heads = ${fmtMoney(grand)} ÷ ${formatWeight(t.cateringHeads)} = <strong>${fmtMoney(perHead)}</strong> per head.</p>
+    <p>A family's share = their own weighted heads × cost per head, minus any credit for expenses a committee member from that family already covered out of pocket.</p>
+    ${variance}
+    <p>${doneCount} of ${budgetItems.length} expense${budgetItems.length === 1 ? "" : "s"} purchased so far.</p>
+  `
+    : `<p>Add some expenses on the Budget tab to see the math here.</p>`;
+
+  $("#reportCategoryBreakdown").innerHTML = buildCategoryBreakdownHtml();
+  renderReportCostSplit(statsSource, perHead, grand);
+  renderReportReimbursements(oopItems);
+  renderReportLedger();
+
+  $("#reportUpdatedAt").textContent = `Live — last refreshed ${new Date().toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}`;
+}
+
+function renderReportCostSplit(statsSource, perHead, grand) {
+  const summaryEl = $("#reportCostSplitSummary");
+  const listEl = $("#reportCostSplitList");
+  if (!summaryEl || !listEl) return;
+  if (!statsSource.length || grand <= 0 || perHead <= 0) {
+    summaryEl.textContent = "Add attendees and expenses to calculate shares.";
+    listEl.innerHTML = "";
+    return;
+  }
+  summaryEl.textContent = `${fmtMoney(perHead)} per catering head × ${formatWeight(attendeeTotals(statsSource).cateringHeads)} heads = ${fmtMoney(grand)} total`;
+  listEl.innerHTML = statsSource
+    .map((a) => {
+      const w = cateringWeight(a);
+      const grossShare = w * perHead;
+      const credit = reimbursementCredit(a.familyName);
+      const netShare = grossShare - credit;
+      const creditLine =
+        credit > 0
+          ? `<div class="cost-split-credit">− ${fmtMoney(credit)} already covered for expenses → <strong>${
+              netShare >= 0 ? fmtMoney(netShare) + " net due" : fmtMoney(-netShare) + " owed back to them"
+            }</strong></div>`
+          : "";
+      return `
+    <div class="cost-split-row">
+      <div>
+        <div class="cost-split-name">${escapeHtml(a.familyName)}</div>
+        <div class="cost-split-share">${formatWeight(w)} heads · ${fmtMoney(grossShare)}</div>
+        ${creditLine}
+      </div>
+      <span class="status-pill ${a.paid ? "good" : "bad"}">${a.paid ? "✅ Paid" : "🔴 Unpaid"}</span>
+    </div>`;
+    })
+    .join("");
+}
+
+function renderReportReimbursements(oopItems) {
+  const summaryEl = $("#reportReimbursementsSummary");
+  const listEl = $("#reportReimbursementsList");
+  if (!summaryEl || !listEl) return;
+  if (!oopItems.length) {
+    summaryEl.textContent = "No reimbursements to track yet.";
+    listEl.innerHTML = "";
+    return;
+  }
+  const totalOwed = oopItems.filter((b) => !budgetItemReimbursed(b)).reduce((s, b) => s + budgetItemTotal(b), 0);
+  const outstandingCount = oopItems.filter((b) => !budgetItemReimbursed(b)).length;
+  summaryEl.textContent =
+    totalOwed > 0
+      ? `${fmtMoney(totalOwed)} still owed back, across ${outstandingCount} expense${outstandingCount === 1 ? "" : "s"}`
+      : "Nothing outstanding — everyone's been reimbursed. ✅";
+
+  const groups = {};
+  oopItems.forEach((b) => {
+    const who = b.assignedTo || "Unassigned";
+    (groups[who] = groups[who] || []).push(b);
+  });
+
+  listEl.innerHTML = Object.entries(groups)
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([who, items]) => {
+      const outstanding = items.filter((b) => !budgetItemReimbursed(b)).reduce((s, b) => s + budgetItemTotal(b), 0);
+      const rows = items
+        .map((b) => {
+          const reimbursed = budgetItemReimbursed(b);
+          return `
+      <div class="cost-split-row">
+        <div>
+          <div class="cost-split-name">${escapeHtml(b.itemName)}</div>
+          <div class="cost-split-share">${fmtMoney(budgetItemTotal(b))}</div>
+        </div>
+        <span class="status-pill ${reimbursed ? "good" : "bad"}">${reimbursed ? "✅ Reimbursed" : "🔴 Owed"}</span>
+      </div>`;
+        })
+        .join("");
+      return `
+    <div class="reimburse-group">
+      <div class="reimburse-group-head">
+        <strong>${escapeHtml(who)}</strong>
+        <span class="${outstanding > 0 ? "reimburse-group-owed" : "muted"}">${
+        outstanding > 0 ? fmtMoney(outstanding) + " owed" : "All reimbursed ✅"
+      }</span>
+      </div>
+      ${rows}
+    </div>`;
+    })
+    .join("");
+}
+
+function renderReportLedger() {
+  const body = $("#reportExpenseTableBody");
+  if (!body) return;
+  if (!budgetItems.length) {
+    body.innerHTML = `<tr class="empty-row"><td colspan="6">No expenses yet.</td></tr>`;
+    return;
+  }
+  const sorted = budgetItems
+    .slice()
+    .sort((a, b) => (a.category || "").localeCompare(b.category || "") || (a.itemName || "").localeCompare(b.itemName || ""));
+  body.innerHTML = sorted
+    .map((b) => {
+      const estimated = budgetItemEstimated(b);
+      const actual = budgetItemActual(b);
+      const done = budgetItemDone(b);
+      return `<tr class="${done ? "row-done" : ""}">
+        <td data-label="Item"><strong>${escapeHtml(b.itemName)}</strong></td>
+        <td data-label="Category">${CATEGORY_ICONS[b.category] || "📦"} ${escapeHtml(b.category || "")}</td>
+        <td data-label="Estimated" class="${actual !== null ? "muted strikethrough" : ""}">${fmtMoney(estimated)}</td>
+        <td data-label="Actual">${actual !== null ? fmtMoney(actual) : "—"}</td>
+        <td data-label="Assigned to" class="muted">${b.assignedTo ? escapeHtml(b.assignedTo) : "—"}${
+          budgetItemPaidOOP(b)
+            ? ` <span class="oop-badge" title="${budgetItemReimbursed(b) ? "Paid out of pocket — already reimbursed" : "Paid out of pocket — needs reimbursement"}">${budgetItemReimbursed(b) ? "💳✓" : "💳"}</span>`
+            : ""
+        }</td>
+        <td data-label="Status">${done ? '<span class="status-pill good">✅ Done</span>' : '<span class="status-pill bad">Planned</span>'}</td>
+      </tr>`;
+    })
+    .join("");
 }
 
 // Draws a branded, shareable "who owes what" summary as a portrait image —
