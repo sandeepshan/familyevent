@@ -585,6 +585,12 @@ label.field-label { font-size: 0.78rem; font-weight: 700; color: var(--ink-soft)
 .paid-checkbox-label input { width: 17px; height: 17px; accent-color: var(--green); cursor: pointer; }
 .done-checkbox-label { display: flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 700; font-size: 0.82rem; white-space: nowrap; }
 .done-checkbox-label input { width: 17px; height: 17px; accent-color: var(--green); cursor: pointer; }
+
+/* ---------- Reimbursements ---------- */
+.reimburse-group { margin-bottom: 16px; }
+.reimburse-group:last-child { margin-bottom: 0; }
+.reimburse-group-head { display: flex; align-items: center; justify-content: space-between; padding: 4px 4px 2px; font-size: 0.88rem; }
+.reimburse-group-owed { color: var(--red); font-weight: 700; font-size: 0.82rem; }
 tr.row-done td { opacity: 0.6; }
 
 /* ---------- Category cap bar ---------- */
