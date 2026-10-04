@@ -970,7 +970,11 @@ function renderBudget() {
         <td data-label="Item"><strong>${escapeHtml(b.itemName)}</strong>${b.receiptUrl ? ` <a href="${b.receiptUrl}" target="_blank" rel="noopener" class="receipt-link" title="View receipt">🧾</a>` : ""}</td>
         <td data-label="Category">${CATEGORY_ICONS[b.category] || "📦"} ${escapeHtml(b.category || "")}</td>
         <td data-label="Price"><strong>${fmtMoney(total)}</strong></td>
-        <td data-label="Assigned to" class="muted">${b.assignedTo ? escapeHtml(b.assignedTo) : "—"}</td>
+        <td data-label="Assigned to" class="muted">${b.assignedTo ? escapeHtml(b.assignedTo) : "—"}${
+          budgetItemPaidOOP(b)
+            ? ` <span class="oop-badge" title="${budgetItemReimbursed(b) ? "Paid out of pocket — already reimbursed" : "Paid out of pocket — needs reimbursement"}">${budgetItemReimbursed(b) ? "💳✓" : "💳"}</span>`
+            : ""
+        }</td>
         <td data-label="Done">
           <label class="done-checkbox-label">
             <input type="checkbox" data-done="${b.id}" ${done ? "checked" : ""} />
