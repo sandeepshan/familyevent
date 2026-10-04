@@ -14,7 +14,7 @@ import { firebaseConfig, isFirebaseConfigured } from "./firebase-config.js";
 // Populated inside boot() once the Firebase SDK has loaded.
 let initializeApp;
 let getFirestore, collection, doc, addDoc, updateDoc, deleteDoc, onSnapshot,
-  query, orderBy, serverTimestamp, getDocs, writeBatch, setDoc, arrayUnion, arrayRemove;
+  query, orderBy, serverTimestamp, getDocs, writeBatch, setDoc, arrayUnion, arrayRemove, deleteField;
 let getStorage, storageRef, uploadBytesResumable, getDownloadURL, deleteObject;
 
 // -----------------------------------------------------------------------------
@@ -114,7 +114,7 @@ async function boot() {
     ]);
     ({ initializeApp } = appMod);
     ({ getFirestore, collection, doc, addDoc, updateDoc, deleteDoc, onSnapshot,
-      query, orderBy, serverTimestamp, getDocs, writeBatch, setDoc, arrayUnion, arrayRemove } = fsMod);
+      query, orderBy, serverTimestamp, getDocs, writeBatch, setDoc, arrayUnion, arrayRemove, deleteField } = fsMod);
     ({ getStorage, uploadBytesResumable, getDownloadURL, deleteObject } = stMod);
     storageRef = stMod.ref;
 
@@ -812,8 +812,19 @@ let budgetItems = [];
 // Backward-compatible readers: older entries were saved with quantity × unit
 // price and a Planned/Purchased status; new entries just have a price, an
 // optional assignee, and a done checkbox.
-function budgetItemTotal(b) {
+// "price" is the estimated price, set when the item is first planned.
+// "actualPrice" is optional and filled in once the purchase is actually
+// made — once it's set, every total/calculation in the app switches over to
+// it automatically (see budgetItemTotal below), since it's the real figure.
+function budgetItemEstimated(b) {
   return typeof b.price === "number" ? b.price : (Number(b.quantity) || 0) * (Number(b.unitPrice) || 0);
+}
+function budgetItemActual(b) {
+  return typeof b.actualPrice === "number" ? b.actualPrice : null;
+}
+function budgetItemTotal(b) {
+  const actual = budgetItemActual(b);
+  return actual !== null ? actual : budgetItemEstimated(b);
 }
 function budgetItemDone(b) {
   return typeof b.done === "boolean" ? b.done : b.status === "Purchased";
@@ -959,17 +970,21 @@ function renderBudget() {
 
   const body = $("#budgetTableBody");
   if (!filtered.length) {
-    body.innerHTML = `<tr class="empty-row"><td colspan="7">No expenses yet. Add plates, catering, water, decorations…</td></tr>`;
+    body.innerHTML = `<tr class="empty-row"><td colspan="8">No expenses yet. Add plates, catering, water, decorations…</td></tr>`;
     return;
   }
   body.innerHTML = filtered
     .map((b) => {
-      const total = budgetItemTotal(b);
+      const estimated = budgetItemEstimated(b);
+      const actual = budgetItemActual(b);
       const done = budgetItemDone(b);
       return `<tr class="${done ? "row-done" : ""}">
         <td data-label="Item"><strong>${escapeHtml(b.itemName)}</strong>${b.receiptUrl ? ` <a href="${b.receiptUrl}" target="_blank" rel="noopener" class="receipt-link" title="View receipt">🧾</a>` : ""}</td>
         <td data-label="Category">${CATEGORY_ICONS[b.category] || "📦"} ${escapeHtml(b.category || "")}</td>
-        <td data-label="Price"><strong>${fmtMoney(total)}</strong></td>
+        <td data-label="Estimated" class="${actual !== null ? "muted strikethrough" : ""}">${fmtMoney(estimated)}</td>
+        <td data-label="Actual">
+          <input type="number" class="input actual-price-input" data-actual="${b.id}" min="0" step="0.01" value="${actual !== null ? actual : ""}" placeholder="Add once purchased" title="Fill in once the purchase is complete — all totals switch to this figure automatically" />
+        </td>
         <td data-label="Assigned to" class="muted">${b.assignedTo ? escapeHtml(b.assignedTo) : "—"}${
           budgetItemPaidOOP(b)
             ? ` <span class="oop-badge" title="${budgetItemReimbursed(b) ? "Paid out of pocket — already reimbursed" : "Paid out of pocket — needs reimbursement"}">${budgetItemReimbursed(b) ? "💳✓" : "💳"}</span>`
@@ -994,6 +1009,16 @@ function renderBudget() {
     btn.addEventListener("click", () => openBudgetModal(budgetItems.find((b) => b.id === btn.dataset.edit)))
   );
   $$("[data-del]", body).forEach((btn) => btn.addEventListener("click", () => confirmDeleteBudget(btn.dataset.del)));
+  $$("[data-actual]", body).forEach((input) => {
+    input.addEventListener("change", () => {
+      const raw = input.value.trim();
+      const update = raw === "" ? { actualPrice: deleteField() } : { actualPrice: parseFloat(raw) || 0 };
+      updateDoc(doc(db, "budgetItems", input.dataset.actual), update).catch((err) => {
+        console.error(err);
+        showToast("Couldn't update — check your connection");
+      });
+    });
+  });
   $$("[data-done]", body).forEach((cb) => {
     cb.addEventListener("change", () => {
       updateDoc(doc(db, "budgetItems", cb.dataset.done), { done: cb.checked }).catch((err) => {
@@ -1299,14 +1324,14 @@ function openBudgetModal(existing) {
       ${BUDGET_CATEGORIES.map((c) => `<option ${existing?.category === c ? "selected" : ""}>${c}</option>`).join("")}
     </select>
     <div class="field-row">
-      <div><label class="field-label">Price</label><input class="input" id="fBPrice" type="number" min="0" step="0.01" value="${existing ? budgetItemTotal(existing) || "" : ""}" placeholder="0.00" /></div>
-      <div><label class="field-label">Assigned to <span class="muted">(optional)</span></label>
-        <select class="input" id="fBAssigned">
-          <option value="">— Unassigned —</option>
-          ${COMMITTEE_MEMBERS.map((m) => `<option ${existing?.assignedTo === m ? "selected" : ""}>${m}</option>`).join("")}
-        </select>
-      </div>
+      <div><label class="field-label">Estimated price</label><input class="input" id="fBPrice" type="number" min="0" step="0.01" value="${existing ? budgetItemEstimated(existing) || "" : ""}" placeholder="0.00" /></div>
+      <div><label class="field-label">Actual price <span class="muted">(optional)</span></label><input class="input" id="fBActualPrice" type="number" min="0" step="0.01" value="${existing && budgetItemActual(existing) !== null ? budgetItemActual(existing) : ""}" placeholder="Fill in once purchased" /></div>
     </div>
+    <label class="field-label">Assigned to <span class="muted">(optional)</span></label>
+    <select class="input" id="fBAssigned">
+      <option value="">— Unassigned —</option>
+      ${COMMITTEE_MEMBERS.map((m) => `<option ${existing?.assignedTo === m ? "selected" : ""}>${m}</option>`).join("")}
+    </select>
     <label class="toggle-row">
       <span class="field-label" style="margin:0">✅ Already done / purchased</span>
       <span class="toggle-switch"><input type="checkbox" id="fBDone" ${existing && budgetItemDone(existing) ? "checked" : ""} /><span class="toggle-track"><span class="toggle-thumb"></span></span></span>
@@ -1334,6 +1359,7 @@ function openBudgetModal(existing) {
         $("#bSave", root).addEventListener("click", async () => {
           const itemName = $("#fBItem", root).value.trim();
           if (!itemName) return showToast("Please enter an item name");
+          const actualRaw = $("#fBActualPrice", root).value.trim();
           const data = {
             itemName,
             category: $("#fBCat", root).value,
@@ -1342,6 +1368,11 @@ function openBudgetModal(existing) {
             done: $("#fBDone", root).checked,
             paidOutOfPocket: $("#fBReimburse", root).checked,
           };
+          if (actualRaw !== "") {
+            data.actualPrice = parseFloat(actualRaw) || 0;
+          } else if (isEdit && budgetItemActual(existing) !== null) {
+            data.actualPrice = deleteField();
+          }
           const saveBtn = $("#bSave", root);
           const receiptFile = $("#fBReceipt", root).files[0];
           try {
@@ -1390,9 +1421,19 @@ function confirmDeleteBudget(id) {
 }
 
 function exportBudgetCsv() {
-  const rows = [["Item", "Category", "Price", "Assigned to", "Done", "Added by", "Receipt"]];
+  const rows = [["Item", "Category", "Estimated price", "Actual price", "Assigned to", "Done", "Added by", "Receipt"]];
   budgetItems.forEach((b) => {
-    rows.push([b.itemName, b.category, budgetItemTotal(b), b.assignedTo || "", budgetItemDone(b) ? "Yes" : "No", b.addedBy || "", b.receiptUrl || ""]);
+    const actual = budgetItemActual(b);
+    rows.push([
+      b.itemName,
+      b.category,
+      budgetItemEstimated(b),
+      actual !== null ? actual : "",
+      b.assignedTo || "",
+      budgetItemDone(b) ? "Yes" : "No",
+      b.addedBy || "",
+      b.receiptUrl || "",
+    ]);
   });
   downloadCsv(rows, "budget.csv");
 }
@@ -1460,25 +1501,30 @@ function exportBudgetExcel() {
   XLSX.utils.book_append_sheet(wb, wsSummary, "Summary");
 
   // ---- Expenses sheet: every line item ----
-  const expenseHeader = ["Item", "Category", `Price (${cur})`, "Assigned to", "Done?", "Added by"];
+  const expenseHeader = ["Item", "Category", `Estimated (${cur})`, `Actual (${cur})`, "Assigned to", "Done?", "Added by"];
   const expenseAoa = [expenseHeader];
+  const grandEstimated = budgetItems.reduce((s, b) => s + budgetItemEstimated(b), 0);
   budgetItems.forEach((b) => {
+    const actual = budgetItemActual(b);
     expenseAoa.push([
       b.itemName || "",
       b.category || "",
-      budgetItemTotal(b),
+      budgetItemEstimated(b),
+      actual !== null ? actual : "",
       b.assignedTo || "",
       budgetItemDone(b) ? "Yes" : "No",
       b.addedBy || "",
     ]);
   });
   expenseAoa.push([]);
-  expenseAoa.push(["TOTAL", "", grand, "", "", ""]);
+  expenseAoa.push(["TOTAL (actual where entered, else estimated)", "", grandEstimated, grand, "", "", ""]);
   const wsExpenses = XLSX.utils.aoa_to_sheet(expenseAoa);
-  wsExpenses["!cols"] = [{ wch: 30 }, { wch: 22 }, { wch: 13 }, { wch: 16 }, { wch: 8 }, { wch: 16 }];
+  wsExpenses["!cols"] = [{ wch: 30 }, { wch: 22 }, { wch: 13 }, { wch: 13 }, { wch: 16 }, { wch: 8 }, { wch: 16 }];
   for (let r = 1; r < expenseAoa.length; r++) {
-    const ref = XLSX.utils.encode_cell({ r, c: 2 });
-    if (wsExpenses[ref] && typeof wsExpenses[ref].v === "number") wsExpenses[ref].z = curFmt;
+    [2, 3].forEach((c) => {
+      const ref = XLSX.utils.encode_cell({ r, c });
+      if (wsExpenses[ref] && typeof wsExpenses[ref].v === "number") wsExpenses[ref].z = curFmt;
+    });
   }
   XLSX.utils.book_append_sheet(wb, wsExpenses, "Expenses");
 
