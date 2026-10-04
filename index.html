@@ -268,51 +268,21 @@
         <button class="btn btn-primary" id="addBudgetBtn">➕ Add item</button>
       </div>
 
-      <div class="grid stats-grid compact">
-        <div class="stat-card highlight"><div class="stat-label">Total spent</div><div class="stat-value" id="budgetGrandTotal">$0</div></div>
-        <div class="stat-card"><div class="stat-label">Items</div><div class="stat-value" id="budgetItemCount">0</div></div>
-        <div class="stat-card"><div class="stat-label">Cost / adult</div><div class="stat-value" id="budgetPerAdult">$0</div></div>
-        <div class="stat-card">
-          <div class="stat-label">Cost / catering head</div>
-          <div class="stat-value" id="budgetPerPerson">$0</div>
-          <div class="stat-sub">weighted: adult=1, kid 5–12=0.5, kid &lt;5=free</div>
+      <div class="card" id="budgetSummaryCard">
+        <div class="grid stats-grid compact budget-stats-row">
+          <div class="stat-card highlight"><div class="stat-label">Total spent</div><div class="stat-value" id="budgetGrandTotal">$0</div></div>
+          <div class="stat-card"><div class="stat-label">Items</div><div class="stat-value" id="budgetItemCount">0</div></div>
+          <div class="stat-card"><div class="stat-label">Cost / adult</div><div class="stat-value" id="budgetPerAdult">$0</div></div>
+          <div class="stat-card"><div class="stat-label">Cost / head</div><div class="stat-value" id="budgetPerPerson">$0</div></div>
         </div>
-      </div>
-
-      <div class="card" id="categoryBreakdownCard">
-        <div class="panel-head" style="margin-bottom:10px">
-          <h3 style="margin:0">By category</h3>
-          <button class="btn btn-ghost" id="setCapsBtn">🎯 Set category budgets</button>
+        <div class="panel-head budget-category-head">
+          <h3>By category</h3>
+          <button class="btn btn-ghost" id="setCapsBtn">🎯 Set budgets</button>
         </div>
         <div id="categoryBreakdown" class="category-breakdown"></div>
       </div>
 
-      <details class="card collapsible-card" id="costSplitCard" open>
-        <summary class="collapsible-summary">
-          <h3>🤝 Who owes what</h3>
-          <span class="collapsible-chevron" aria-hidden="true">▾</span>
-        </summary>
-        <div class="collapsible-body">
-          <p class="muted" style="margin-bottom:10px">Split fairly by catering headcount (adult = 1, kid 5–12 = 0.5, kid &lt;5 = free).</p>
-          <div class="cost-split-summary" id="costSplitSummary">Add attendees and expenses to calculate shares.</div>
-          <div id="costSplitList" class="cost-split-list"></div>
-          <div class="cost-split-actions">
-            <button class="btn btn-ghost" id="shareCostSplitBtn">📤 Share summary</button>
-          </div>
-        </div>
-      </details>
-
-      <details class="card collapsible-card" id="reimbursementsCard" open>
-        <summary class="collapsible-summary">
-          <h3>💳 Owed to committee</h3>
-          <span class="collapsible-chevron" aria-hidden="true">▾</span>
-        </summary>
-        <div class="collapsible-body">
-          <p class="muted" style="margin-bottom:10px">Expenses a committee member paid for out of their own pocket — reimburse them from the collected funds. Tick "Paid out of pocket" when adding or editing an expense to track it here.</p>
-          <div class="cost-split-summary" id="reimbursementsSummary">No reimbursements to track yet.</div>
-          <div id="reimbursementsList" class="cost-split-list"></div>
-        </div>
-      </details>
+      <p class="muted budget-report-hint">Looking for who owes what or what's owed back? Check the <strong>📊 Report</strong> tab — it stays in sync with every expense you add here.</p>
 
       <div class="card table-card">
         <div class="table-toolbar">
@@ -348,26 +318,29 @@
     <section id="tab-report" class="tab-panel">
       <div class="panel-head">
         <h2>📊 Money tracker</h2>
-        <button class="btn btn-primary" id="reportExportExcelBtn">⬇️ Download Excel</button>
+        <div class="panel-actions">
+          <button class="btn btn-ghost" id="reportShareBtn">📤 Share</button>
+          <button class="btn btn-primary" id="reportExportExcelBtn">⬇️ Excel</button>
+        </div>
       </div>
       <p class="muted report-intro">A live snapshot of who owes what and who's still owed back — updates automatically, nothing to re-download.</p>
 
       <div class="grid stats-grid compact">
         <div class="stat-card highlight"><div class="stat-label">Total expenses</div><div class="stat-value" id="reportGrandTotal">$0</div></div>
         <div class="stat-card"><div class="stat-label">Cost / catering head</div><div class="stat-value" id="reportPerHead">$0</div></div>
-        <div class="stat-card"><div class="stat-label">Collected</div><div class="stat-value" id="reportCollected">$0</div></div>
-        <div class="stat-card"><div class="stat-label">Outstanding</div><div class="stat-value" id="reportOutstanding">$0</div></div>
-        <div class="stat-card"><div class="stat-label">Owed back</div><div class="stat-value" id="reportOwedCommittee">$0</div></div>
+        <div class="stat-card"><div class="stat-label">Collected</div><div class="stat-value good-value" id="reportCollected">$0</div></div>
+        <div class="stat-card"><div class="stat-label">Outstanding</div><div class="stat-value warn-value" id="reportOutstanding">$0</div></div>
+        <div class="stat-card highlight alt"><div class="stat-label">Owed back</div><div class="stat-value" id="reportOwedCommittee">$0</div></div>
       </div>
 
       <div class="card" id="reportMathCard">
-        <h3 class="report-card-title">How the per-head cost works</h3>
+        <div class="report-formula" id="reportFormula">—</div>
         <div id="reportMathExplainer" class="report-explainer"></div>
       </div>
 
       <div class="card table-card">
         <h3 class="report-card-title">🤝 Who owes &amp; who's owed</h3>
-        <p class="muted" style="margin:-4px 0 12px; font-size:0.84rem">Share = their catering cost. Spent = what they've paid for out of their own pocket. To be paid = what they still need to contribute. Owed = what should be paid back to them.</p>
+        <p class="muted report-legend">Share = catering cost. Spent = paid out of their own pocket. To be paid / Owed = what's still outstanding, either way.</p>
         <div class="table-wrap">
           <table class="data-table" id="reportLedgerTable">
             <thead>
