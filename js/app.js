@@ -878,7 +878,7 @@ function initBudget() {
   $("#exportBudgetBtn").addEventListener("click", exportBudgetCsv);
   $("#exportBudgetExcelBtn").addEventListener("click", exportBudgetExcel);
   $("#setCapsBtn").addEventListener("click", openCategoryCapsModal);
-  $("#shareCostSplitBtn").addEventListener("click", shareCostSplitCard);
+  $("#reportShareBtn")?.addEventListener("click", shareCostSplitCard);
   $("#reportExportExcelBtn")?.addEventListener("click", exportBudgetExcel);
 }
 
@@ -941,8 +941,6 @@ function renderBudget() {
   // Category breakdown
   $("#categoryBreakdown").innerHTML = buildCategoryBreakdownHtml();
 
-  renderCostSplit();
-  renderReimbursements();
   renderReport();
 
   const body = $("#budgetTableBody");
@@ -1006,136 +1004,8 @@ function renderBudget() {
   });
 }
 
-function renderCostSplit() {
-  const summaryEl = $("#costSplitSummary");
-  const listEl = $("#costSplitList");
-  if (!summaryEl || !listEl) return;
-  const statsSource = confirmedOnly() ? attendees.filter((a) => a.rsvp === "Confirmed") : attendees;
-  const grand = budgetGrandTotal(budgetItems);
-  const t = attendeeTotals(statsSource);
-  if (!statsSource.length || grand <= 0 || t.cateringHeads <= 0) {
-    summaryEl.textContent = "Add attendees and expenses to calculate shares.";
-    listEl.innerHTML = "";
-    return;
-  }
-  const perHead = grand / t.cateringHeads;
-  summaryEl.textContent = `${fmtMoney(perHead)} per catering head × ${formatWeight(t.cateringHeads)} heads = ${fmtMoney(grand)} total`;
-  listEl.innerHTML = statsSource
-    .map((a) => {
-      const w = cateringWeight(a);
-      const grossShare = w * perHead;
-      const credit = reimbursementCredit(a.familyName);
-      const netShare = grossShare - credit;
-      const waHref = costSplitWhatsappHref(a, netShare, w, perHead, credit);
-      const creditLine =
-        credit > 0
-          ? `<div class="cost-split-credit">− ${fmtMoney(credit)} already covered for expenses → <strong>${
-              netShare >= 0 ? fmtMoney(netShare) + " net due" : fmtMoney(-netShare) + " owed back to them"
-            }</strong></div>`
-          : "";
-      return `
-    <div class="cost-split-row">
-      <div>
-        <div class="cost-split-name">${escapeHtml(a.familyName)}</div>
-        <div class="cost-split-share">${formatWeight(w)} heads · ${fmtMoney(grossShare)}</div>
-        ${creditLine}
-      </div>
-      <div class="cost-split-row-actions">
-        ${waHref ? `<a class="icon-action" href="${waHref}" target="_blank" rel="noopener" title="Send amount due via WhatsApp">💬</a>` : ""}
-        <label class="paid-checkbox-label">
-          <input type="checkbox" data-paid="${a.id}" ${a.paid ? "checked" : ""} />
-          ${a.paid ? "Paid" : "Unpaid"}
-        </label>
-      </div>
-    </div>`;
-    })
-    .join("");
-
-  $$("[data-paid]", listEl).forEach((cb) => {
-    cb.addEventListener("change", () => {
-      updateDoc(doc(db, "attendees", cb.dataset.paid), { paid: cb.checked }).catch((err) => {
-        console.error(err);
-        showToast("Couldn't update — check your connection");
-      });
-    });
-  });
-}
-
-// The flip side of "who owes what": expenses a committee member covered out
-// of their own pocket, grouped by who paid, so the committee knows who
-// still needs paying back from the collected funds. Reuses each budget
-// item's existing "Assigned to" field rather than a separate list, so
-// there's nothing extra to re-enter.
-function renderReimbursements() {
-  const summaryEl = $("#reimbursementsSummary");
-  const listEl = $("#reimbursementsList");
-  if (!summaryEl || !listEl) return;
-
-  const oopItems = budgetItems.filter((b) => budgetItemPaidOOP(b));
-  if (!oopItems.length) {
-    summaryEl.textContent = "No reimbursements to track yet.";
-    listEl.innerHTML = "";
-    return;
-  }
-
-  const totalOwed = oopItems.filter((b) => !budgetItemReimbursed(b)).reduce((s, b) => s + budgetItemTotal(b), 0);
-  const outstandingCount = oopItems.filter((b) => !budgetItemReimbursed(b)).length;
-  summaryEl.textContent =
-    totalOwed > 0
-      ? `${fmtMoney(totalOwed)} still owed back, across ${outstandingCount} expense${outstandingCount === 1 ? "" : "s"}`
-      : "Nothing outstanding — everyone's been reimbursed. ✅";
-
-  const groups = {};
-  oopItems.forEach((b) => {
-    const who = b.assignedTo || "Unassigned";
-    (groups[who] = groups[who] || []).push(b);
-  });
-
-  listEl.innerHTML = Object.entries(groups)
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([who, items]) => {
-      const outstanding = items.filter((b) => !budgetItemReimbursed(b)).reduce((s, b) => s + budgetItemTotal(b), 0);
-      const rows = items
-        .map((b) => {
-          const reimbursed = budgetItemReimbursed(b);
-          return `
-      <div class="cost-split-row">
-        <div>
-          <div class="cost-split-name">${escapeHtml(b.itemName)}</div>
-          <div class="cost-split-share">${fmtMoney(budgetItemTotal(b))}</div>
-        </div>
-        <label class="paid-checkbox-label">
-          <input type="checkbox" data-reimbursed="${b.id}" ${reimbursed ? "checked" : ""} />
-          ${reimbursed ? "Reimbursed" : "Owed"}
-        </label>
-      </div>`;
-        })
-        .join("");
-      return `
-    <div class="reimburse-group">
-      <div class="reimburse-group-head">
-        <strong>${escapeHtml(who)}</strong>
-        <span class="${outstanding > 0 ? "reimburse-group-owed" : "muted"}">${
-        outstanding > 0 ? fmtMoney(outstanding) + " owed" : "All reimbursed ✅"
-      }</span>
-      </div>
-      ${rows}
-    </div>`;
-    })
-    .join("");
-
-  $$("[data-reimbursed]", listEl).forEach((cb) => {
-    cb.addEventListener("change", () => {
-      updateDoc(doc(db, "budgetItems", cb.dataset.reimbursed), { reimbursed: cb.checked }).catch((err) => {
-        console.error(err);
-        showToast("Couldn't update — check your connection");
-      });
-    });
-  });
-}
-
-// Shared by the Budget tab's own category card and the read-only Report tab
-// below, so the two never drift out of sync.
+// Shared by the Budget tab's own category card and the Report tab below, so
+// the two never drift out of sync.
 function buildCategoryBreakdownHtml() {
   const byCat = {};
   budgetItems.forEach((b) => {
@@ -1173,7 +1043,10 @@ function buildCategoryBreakdownHtml() {
 // One row per person: merges attendees (who owe a catering share) with
 // anyone who's spent money out of their own pocket (who may or may not also
 // be an attendee), matched by exact name — same matching rule used
-// everywhere else credit is netted.
+// everywhere else credit is netted. Keeps the attendee record and the ids
+// of their still-unreimbursed expenses so the row can carry its own
+// "mark paid" / "mark paid back" actions — this is now the only place in
+// the app those two things are tracked.
 function buildReportLedgerRows(statsSource, perHead) {
   const spentByKey = {};
   budgetItems
@@ -1182,9 +1055,12 @@ function buildReportLedgerRows(statsSource, perHead) {
       const who = (b.assignedTo || "").trim();
       if (!who) return;
       const key = who.toLowerCase();
-      if (!spentByKey[key]) spentByKey[key] = { name: who, all: 0, unreimbursed: 0 };
+      if (!spentByKey[key]) spentByKey[key] = { name: who, all: 0, unreimbursed: 0, unreimbursedIds: [] };
       spentByKey[key].all += budgetItemTotal(b);
-      if (!budgetItemReimbursed(b)) spentByKey[key].unreimbursed += budgetItemTotal(b);
+      if (!budgetItemReimbursed(b)) {
+        spentByKey[key].unreimbursed += budgetItemTotal(b);
+        spentByKey[key].unreimbursedIds.push(b.id);
+      }
     });
 
   const rows = new Map();
@@ -1194,22 +1070,26 @@ function buildReportLedgerRows(statsSource, perHead) {
     if (spent) delete spentByKey[key];
     rows.set(key, {
       name: a.familyName,
+      attendee: a,
       isAttendee: true,
       share: cateringWeight(a) * perHead,
       paid: !!a.paid,
       spentAll: spent ? spent.all : 0,
       unreimbursedCredit: spent ? spent.unreimbursed : 0,
+      unreimbursedIds: spent ? spent.unreimbursedIds : [],
     });
   });
   // Anyone left over paid for something but isn't (or isn't yet) an attendee.
   Object.values(spentByKey).forEach((s) => {
     rows.set(s.name.toLowerCase(), {
       name: s.name,
+      attendee: null,
       isAttendee: false,
       share: 0,
       paid: null,
       spentAll: s.all,
       unreimbursedCredit: s.unreimbursed,
+      unreimbursedIds: s.unreimbursedIds,
     });
   });
 
@@ -1221,7 +1101,57 @@ function buildReportLedgerRows(statsSource, perHead) {
       const settled = owed === 0 && (toBePaid === 0 || r.paid === true);
       return { ...r, toBePaid, owed, settled };
     })
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .sort((a, b) => {
+      if (a.settled !== b.settled) return a.settled ? 1 : -1; // pending rows float to the top
+      return a.name.localeCompare(b.name);
+    });
+}
+
+// Small deterministic hash so the same name always gets the same avatar
+// color, without storing anything extra.
+function nameHash(str) {
+  let h = 0;
+  for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) >>> 0;
+  return h;
+}
+const AVATAR_COLORS = ["var(--peacock)", "var(--magenta)", "var(--gold)", "var(--green)", "var(--peacock-dark)", "var(--magenta-deep)"];
+function avatarHtml(name) {
+  const initials = name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((p) => p[0].toUpperCase())
+    .join("");
+  const color = AVATAR_COLORS[nameHash(name) % AVATAR_COLORS.length];
+  return `<span class="person-avatar" style="background:${color}">${escapeHtml(initials)}</span>`;
+}
+
+function reportLedgerRowHtml(r, perHead) {
+  const w = r.attendee ? cateringWeight(r.attendee) : 0;
+  const net = r.share - r.unreimbursedCredit;
+  const waHref = r.attendee ? costSplitWhatsappHref(r.attendee, net, w, perHead, r.unreimbursedCredit) : "";
+  return `<tr class="${r.settled ? "report-row-settled" : "report-row-pending"}">
+    <td data-label="Name">
+      <span class="report-name-cell">
+        ${avatarHtml(r.name)}
+        <strong>${escapeHtml(r.name)}</strong>
+        ${waHref ? `<a class="icon-action" href="${waHref}" target="_blank" rel="noopener" title="Message via WhatsApp">💬</a>` : ""}
+      </span>
+    </td>
+    <td data-label="Share">${r.isAttendee ? fmtMoney(r.share) : "—"}</td>
+    <td data-label="Spent">${r.spentAll > 0 ? fmtMoney(r.spentAll) : "—"}</td>
+    <td data-label="To be paid">${
+      r.toBePaid > 0
+        ? `<span class="report-cell-stack"><span class="report-amount">${fmtMoney(r.toBePaid)}</span><label class="paid-checkbox-label"><input type="checkbox" data-report-paid="${r.attendee.id}" ${r.paid ? "checked" : ""} /> Paid</label></span>`
+        : "—"
+    }</td>
+    <td data-label="Owed">${
+      r.owed > 0
+        ? `<span class="report-cell-stack"><span class="report-amount">${fmtMoney(r.owed)}</span><label class="paid-checkbox-label"><input type="checkbox" data-report-reimburse="${r.unreimbursedIds.join(",")}" /> Paid back</label></span>`
+        : "—"
+    }</td>
+    <td data-label="Status"><span class="status-pill ${r.settled ? "good" : "bad"}">${r.settled ? "✅ Settled" : "🔴 Pending"}</span></td>
+  </tr>`;
 }
 
 function renderReport() {
@@ -1244,40 +1174,45 @@ function renderReport() {
   $("#reportOutstanding").textContent = fmtMoney(outstanding);
   $("#reportOwedCommittee").textContent = fmtMoney(owedBack);
 
+  const formulaEl = $("#reportFormula");
+  if (formulaEl) {
+    formulaEl.innerHTML = t.cateringHeads > 0
+      ? `${fmtMoney(grand)} <span class="report-formula-op">÷</span> ${formatWeight(t.cateringHeads)} heads <span class="report-formula-op">=</span> <strong>${fmtMoney(perHead)}</strong> / head`
+      : "Add attendees and expenses to see the math.";
+  }
   const doneCount = budgetItems.filter((b) => budgetItemDone(b)).length;
   const variance =
     grandEstimated !== grand
-      ? `<p>Estimated expenses came to ${fmtMoney(grandEstimated)} — the actual total is ${fmtMoney(Math.abs(grand - grandEstimated))} ${
-          grand > grandEstimated ? "higher" : "lower"
-        } now that real purchase prices have come in.</p>`
+      ? ` Actual costs are now ${fmtMoney(Math.abs(grand - grandEstimated))} ${grand > grandEstimated ? "higher" : "lower"} than the original estimate.`
       : "";
   $("#reportMathExplainer").innerHTML = budgetItems.length
-    ? `
-    <p>Each adult counts as 1 catering head, each kid aged 5–12 as 0.5, and kids under 5 are free.</p>
-    <p>Cost per head = total expenses ÷ total weighted catering heads = ${fmtMoney(grand)} ÷ ${formatWeight(t.cateringHeads)} = <strong>${fmtMoney(perHead)}</strong> per head.</p>
-    <p>A family's share = their own weighted heads × cost per head, minus anything they've already spent out of their own pocket that hasn't been paid back yet.</p>
-    ${variance}
-    <p>${doneCount} of ${budgetItems.length} expense${budgetItems.length === 1 ? "" : "s"} purchased so far.</p>
-  `
+    ? `<p>A family's share is their weighted catering heads (adult = 1, kid 5–12 = 0.5, kid &lt;5 = free) × the cost per head, minus anything they've already spent out of pocket that hasn't been paid back.${variance}</p><p class="report-progress-note">${doneCount} of ${budgetItems.length} expense${budgetItems.length === 1 ? "" : "s"} purchased so far.</p>`
     : `<p>Add some expenses on the Budget tab to see the math here.</p>`;
 
   const body = $("#reportLedgerTableBody");
   if (!rows.length) {
     body.innerHTML = `<tr class="empty-row"><td colspan="6">Add attendees and expenses to see the ledger.</td></tr>`;
   } else {
-    body.innerHTML = rows
-      .map((r) => {
-        return `<tr>
-        <td data-label="Name"><strong>${escapeHtml(r.name)}</strong></td>
-        <td data-label="Share">${r.isAttendee ? fmtMoney(r.share) : "—"}</td>
-        <td data-label="Spent">${r.spentAll > 0 ? fmtMoney(r.spentAll) : "—"}</td>
-        <td data-label="To be paid">${r.toBePaid > 0 ? fmtMoney(r.toBePaid) : "—"}</td>
-        <td data-label="Owed">${r.owed > 0 ? fmtMoney(r.owed) : "—"}</td>
-        <td data-label="Status"><span class="status-pill ${r.settled ? "good" : "bad"}">${r.settled ? "✅ Settled" : "🔴 Pending"}</span></td>
-      </tr>`;
-      })
-      .join("");
+    body.innerHTML = rows.map((r) => reportLedgerRowHtml(r, perHead)).join("");
   }
+
+  $$("[data-report-paid]", body).forEach((cb) => {
+    cb.addEventListener("change", () => {
+      updateDoc(doc(db, "attendees", cb.dataset.reportPaid), { paid: cb.checked }).catch((err) => {
+        console.error(err);
+        showToast("Couldn't update — check your connection");
+      });
+    });
+  });
+  $$("[data-report-reimburse]", body).forEach((cb) => {
+    cb.addEventListener("change", () => {
+      const ids = cb.dataset.reportReimburse.split(",").filter(Boolean);
+      Promise.all(ids.map((id) => updateDoc(doc(db, "budgetItems", id), { reimbursed: cb.checked }))).catch((err) => {
+        console.error(err);
+        showToast("Couldn't update — check your connection");
+      });
+    });
+  });
 
   $("#reportUpdatedAt").textContent = `Live — last refreshed ${new Date().toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}`;
 }
