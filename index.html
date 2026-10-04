@@ -67,6 +67,7 @@
       <button class="tab-btn" data-tab="attendees" role="tab" aria-selected="false">👨‍👩‍👧‍👦 <span>Attendees</span></button>
       <button class="tab-btn" data-tab="budget" role="tab" aria-selected="false">🧾 <span>Budget</span></button>
       <button class="tab-btn" data-tab="report" role="tab" aria-selected="false">📊 <span>Report</span></button>
+      <button class="tab-btn" data-tab="message" role="tab" aria-selected="false">💬 <span>Message</span></button>
       <button class="tab-btn" data-tab="schedule" role="tab" aria-selected="false">🗓️ <span>Schedule</span></button>
       <button class="tab-btn" data-tab="photos" role="tab" aria-selected="false">📸 <span>Photos</span></button>
       <button class="tab-btn" data-tab="games" role="tab" aria-selected="false">🎉 <span>Games</span></button>
@@ -361,6 +362,24 @@
       </div>
 
       <p class="muted report-footer" id="reportUpdatedAt"></p>
+    </section>
+
+    <!-- ============ MESSAGE ============ -->
+    <section id="tab-message" class="tab-panel">
+      <div class="panel-head">
+        <h2>💬 Message to attendees</h2>
+      </div>
+      <p class="muted message-intro">A ready-to-send broadcast explaining the per-head cost, how to pay, and getting everyone excited — updates automatically as attendees and expenses change, so copy it fresh right before you send.</p>
+
+      <div class="quick-actions message-actions">
+        <button class="btn btn-primary" id="messageCopyBtn">📋 Copy message</button>
+        <a class="btn" id="messageWhatsappBtn" href="https://wa.me/" target="_blank" rel="noopener">💬 Share on WhatsApp</a>
+        <a class="btn" id="messageEmailBtn" href="mailto:">✉️ Share by email</a>
+      </div>
+
+      <div class="card message-card">
+        <div class="message-preview" id="messagePreview">Add attendees and expenses to draft the message.</div>
+      </div>
     </section>
 
     <!-- ============ SCHEDULE ============ -->
