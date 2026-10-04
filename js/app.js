@@ -143,6 +143,7 @@ async function boot() {
   initGuestbook();
   initCrewRoles();
   initCommunications();
+  initMessage();
   registerServiceWorker();
 }
 
@@ -942,6 +943,7 @@ function renderBudget() {
   $("#categoryBreakdown").innerHTML = buildCategoryBreakdownHtml();
 
   renderReport();
+  renderMessage();
 
   const body = $("#budgetTableBody");
   if (!filtered.length) {
@@ -3903,6 +3905,89 @@ function costSplitWhatsappHref(a, netShare, w, perHead, credit) {
   if (!digits) return "";
   const text = encodeURIComponent(costSplitMessageText(a, netShare, w, perHead, credit));
   return `https://wa.me/${digits}?text=${text}`;
+}
+
+// -----------------------------------------------------------------------------
+// Message tab: one ready-drafted broadcast (not per-family) covering the
+// per-head cost logic, the equal-split concept, how to pay, and a hype
+// closer — meant to be copied/shared once to a family WhatsApp group or
+// broadcast list, rather than sent per attendee like costSplitMessageText
+// above. Pulls live totals so it's always current as of whenever it's
+// copied; PayID number is fixed text, not a Settings field, since it was
+// given once for this specific message.
+// -----------------------------------------------------------------------------
+function messageDraftText() {
+  const name = eventInfo.eventName || "our family get-together";
+  const start = eventStartDateTime();
+  const dateStr = start
+    ? start.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })
+    : "";
+  const timeStr = eventTimeRangeLabel();
+  const venue = eventInfo.venue || "";
+
+  const statsSource = confirmedOnly() ? attendees.filter((a) => a.rsvp === "Confirmed") : attendees;
+  const t = attendeeTotals(statsSource);
+  const grand = budgetGrandTotal(budgetItems);
+  const perHead = t.cateringHeads > 0 ? grand / t.cateringHeads : 0;
+
+  let when = "";
+  if (dateStr) when += ` on *${dateStr}*`;
+  if (timeStr) when += ` at ${timeStr}`;
+
+  let msg = `Hi everyone! 👋 Quick update on costs for *${name}*${when}`;
+  if (venue) msg += ` 📍 ${venue}`;
+  msg += `.\n\n`;
+
+  msg += `*💰 How we're splitting the cost*\n`;
+  msg += `To keep things simple and fair, the full cost of the day is being shared equally per catering head:\n`;
+  msg += `• Adults = 1 head\n`;
+  msg += `• Kids 5–12 = half a head\n`;
+  msg += `• Kids under 5 = free\n\n`;
+
+  if (t.cateringHeads > 0 && grand > 0) {
+    msg += `Right now: *${fmtMoney(grand)}* total expenses ÷ *${formatWeight(t.cateringHeads)} catering heads* = *${fmtMoney(
+      perHead
+    )} per head*.\n`;
+    msg += `So your family's share = (your number of heads) × ${fmtMoney(perHead)}. Message me directly if you'd like your exact family total worked out.\n\n`;
+  } else {
+    msg += `We'll share the exact per-head figure here once RSVPs and expenses are finalised — thanks for your patience!\n\n`;
+  }
+
+  msg += `*💳 How to pay*\n`;
+  msg += `Please send your share via *PayID to 0420776804* whenever suits - no rush, just sometime before the big day. 🙏\n\n`;
+
+  msg += `*🎉 Can't wait for this one!*\n`;
+  msg += `We're planning great conversations, plenty of bonding, fun family games, and delicious food. It's going to be such a special day together - thank you all for being part of it. See you there! ❤️`;
+
+  return msg;
+}
+
+function refreshMessageLinks() {
+  const text = encodeURIComponent(messageDraftText());
+  const waLink = $("#messageWhatsappBtn");
+  if (waLink) waLink.href = `https://wa.me/?text=${text}`;
+  const subject = encodeURIComponent(`${eventInfo.eventName || "Family Get-Together"} — cost & payment details`);
+  const emailLink = $("#messageEmailBtn");
+  if (emailLink) emailLink.href = `mailto:?subject=${subject}&body=${text}`;
+}
+
+function renderMessage() {
+  const el = $("#messagePreview");
+  if (!el) return;
+  el.textContent = messageDraftText();
+  refreshMessageLinks();
+}
+
+function initMessage() {
+  $("#messageCopyBtn")?.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(messageDraftText());
+      showToast("Message copied — paste it into WhatsApp");
+    } catch (err) {
+      console.error(err);
+      showToast("Couldn't copy automatically — select and copy the text below");
+    }
+  });
 }
 
 // =============================================================================
