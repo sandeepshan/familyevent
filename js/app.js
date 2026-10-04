@@ -286,6 +286,9 @@ function openSettingsModal() {
     <input class="input" id="setVenue" value="${escapeHtml(eventInfo.venue || "")}" placeholder="e.g. Green Park Community Hall" />
     <label class="field-label">Budget target (optional)</label>
     <input class="input" id="setBudgetTarget" type="number" min="0" step="0.01" value="${eventInfo.budgetTarget || ""}" placeholder="e.g. 1500" />
+    <label class="field-label">Payment details for dues (optional)</label>
+    <input class="input" id="setPaymentNote" value="${escapeHtml(eventInfo.paymentNote || "")}" placeholder="e.g. Pay via UPI: name@okbank or bank transfer BSB 000-000 Acc 00000000" />
+    <p class="muted" style="margin-top:-6px;margin-bottom:10px">Added to the "send amount due" WhatsApp message on the Budget tab's Who owes what list.</p>
     <div class="modal-actions">
       <button class="btn btn-ghost" id="settingsCancel">Cancel</button>
       <button class="btn btn-primary" id="settingsSave">Save</button>
@@ -303,6 +306,7 @@ function openSettingsModal() {
             venue: $("#setVenue", root).value.trim(),
             currencySymbol: $("#setCurrency", root).value,
             budgetTarget: parseFloat($("#setBudgetTarget", root).value) || 0,
+            paymentNote: $("#setPaymentNote", root).value.trim(),
           };
           try {
             await setDoc(doc(db, "settings", "eventInfo"), data, { merge: true });
@@ -830,6 +834,7 @@ function initBudget() {
 
   $("#addBudgetBtn").addEventListener("click", () => openBudgetModal());
   $("#exportBudgetBtn").addEventListener("click", exportBudgetCsv);
+  $("#exportBudgetExcelBtn").addEventListener("click", exportBudgetExcel);
   $("#setCapsBtn").addEventListener("click", openCategoryCapsModal);
   $("#shareCostSplitBtn").addEventListener("click", shareCostSplitCard);
 }
@@ -981,16 +986,20 @@ function renderCostSplit() {
     .map((a) => {
       const w = cateringWeight(a);
       const share = w * perHead;
+      const waHref = costSplitWhatsappHref(a, share, w, perHead);
       return `
     <div class="cost-split-row">
       <div>
         <div class="cost-split-name">${escapeHtml(a.familyName)}</div>
         <div class="cost-split-share">${formatWeight(w)} heads · ${fmtMoney(share)}</div>
       </div>
-      <label class="paid-checkbox-label">
-        <input type="checkbox" data-paid="${a.id}" ${a.paid ? "checked" : ""} />
-        ${a.paid ? "Paid" : "Unpaid"}
-      </label>
+      <div class="cost-split-row-actions">
+        ${waHref ? `<a class="icon-action" href="${waHref}" target="_blank" rel="noopener" title="Send amount due via WhatsApp">💬</a>` : ""}
+        <label class="paid-checkbox-label">
+          <input type="checkbox" data-paid="${a.id}" ${a.paid ? "checked" : ""} />
+          ${a.paid ? "Paid" : "Unpaid"}
+        </label>
+      </div>
     </div>`;
     })
     .join("");
@@ -1257,6 +1266,152 @@ function exportBudgetCsv() {
     rows.push([b.itemName, b.category, budgetItemTotal(b), b.assignedTo || "", budgetItemDone(b) ? "Yes" : "No", b.addedBy || "", b.receiptUrl || ""]);
   });
   downloadCsv(rows, "budget.csv");
+}
+
+// Excel number-format string that shows this event's currency symbol as a
+// literal prefix — works for single-char ($, €, £, ₹) and two-char (A$, C$)
+// symbols alike, since Excel format codes allow any quoted literal text.
+function xlsxCurrencyFormat() {
+  const cur = (eventInfo.currencySymbol || "$").replace(/"/g, "'");
+  return `"${cur}"#,##0.00`;
+}
+
+// A shareable, always-current budget workbook for the committee: built
+// fresh from the live Firestore data every time someone clicks the button,
+// so re-downloading after adding expenses just works — there's no separate
+// file to keep in sync. Four sheets: a plain-language explanation of the
+// per-head cost math, the full itemized expense list, the category
+// breakdown, and the per-family "who owes what" split.
+function exportBudgetExcel() {
+  if (typeof XLSX === "undefined") return showToast("Still loading — try again in a moment");
+  if (!budgetItems.length) return showToast("Add some expenses first");
+
+  const cur = eventInfo.currencySymbol || "$";
+  const curFmt = xlsxCurrencyFormat();
+  const grand = budgetGrandTotal(budgetItems);
+  const statsSource = confirmedOnly() ? attendees.filter((a) => a.rsvp === "Confirmed") : attendees;
+  const t = attendeeTotals(statsSource);
+  const perHead = t.cateringHeads > 0 ? grand / t.cateringHeads : 0;
+  const perAdult = t.adults > 0 ? grand / t.adults : 0;
+  const start = eventStartDateTime();
+  const dateStr = start
+    ? start.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" })
+    : "Date not set";
+
+  const wb = XLSX.utils.book_new();
+
+  // ---- Summary sheet: the per-head cost explained in plain language ----
+  const wsSummary = XLSX.utils.aoa_to_sheet([
+    [eventInfo.eventName || "Family Get-Together"],
+    [eventInfo.venue || ""],
+    [dateStr],
+    [],
+    ["Generated", new Date().toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })],
+    ["Currency", cur],
+    [],
+    ["TOTAL EXPENSES", grand],
+    ["TOTAL CATERING HEADS (weighted)", t.cateringHeads],
+    ["COST PER CATERING HEAD", perHead],
+    ["COST PER ADULT", perAdult],
+    [],
+    ["How the per-head cost is worked out:"],
+    ["• Each adult counts as 1 catering head"],
+    ["• Each kid aged 5–12 counts as 0.5 catering head"],
+    ["• Each kid under 5 is free — 0 catering heads"],
+    ["• Cost per head = Total expenses ÷ total weighted catering heads"],
+    ["• A family's share = their own weighted heads × cost per head"],
+    [],
+    ["See the 'Who owes what' tab for each family's exact share."],
+  ]);
+  wsSummary["!cols"] = [{ wch: 38 }, { wch: 20 }];
+  [
+    ["B8", grand],
+    ["B10", perHead],
+    ["B11", perAdult],
+  ].forEach(([ref]) => {
+    if (wsSummary[ref]) wsSummary[ref].z = curFmt;
+  });
+  XLSX.utils.book_append_sheet(wb, wsSummary, "Summary");
+
+  // ---- Expenses sheet: every line item ----
+  const expenseHeader = ["Item", "Category", `Price (${cur})`, "Assigned to", "Done?", "Added by"];
+  const expenseAoa = [expenseHeader];
+  budgetItems.forEach((b) => {
+    expenseAoa.push([
+      b.itemName || "",
+      b.category || "",
+      budgetItemTotal(b),
+      b.assignedTo || "",
+      budgetItemDone(b) ? "Yes" : "No",
+      b.addedBy || "",
+    ]);
+  });
+  expenseAoa.push([]);
+  expenseAoa.push(["TOTAL", "", grand, "", "", ""]);
+  const wsExpenses = XLSX.utils.aoa_to_sheet(expenseAoa);
+  wsExpenses["!cols"] = [{ wch: 30 }, { wch: 22 }, { wch: 13 }, { wch: 16 }, { wch: 8 }, { wch: 16 }];
+  for (let r = 1; r < expenseAoa.length; r++) {
+    const ref = XLSX.utils.encode_cell({ r, c: 2 });
+    if (wsExpenses[ref] && typeof wsExpenses[ref].v === "number") wsExpenses[ref].z = curFmt;
+  }
+  XLSX.utils.book_append_sheet(wb, wsExpenses, "Expenses");
+
+  // ---- Category breakdown ----
+  const byCat = {};
+  budgetItems.forEach((b) => {
+    const cat = b.category || "Miscellaneous";
+    byCat[cat] = (byCat[cat] || 0) + budgetItemTotal(b);
+  });
+  const catEntries = Object.entries(byCat).sort((a, b) => b[1] - a[1]);
+  const catHeader = ["Category", `Total (${cur})`, "% of total", `Cap (${cur})`];
+  const catAoa = [catHeader];
+  catEntries.forEach(([cat, amt]) => {
+    catAoa.push([cat, amt, grand > 0 ? amt / grand : 0, (eventInfo.categoryCaps && eventInfo.categoryCaps[cat]) || ""]);
+  });
+  catAoa.push([]);
+  catAoa.push(["TOTAL", grand, 1, ""]);
+  const wsCats = XLSX.utils.aoa_to_sheet(catAoa);
+  wsCats["!cols"] = [{ wch: 24 }, { wch: 13 }, { wch: 11 }, { wch: 11 }];
+  for (let r = 1; r < catAoa.length; r++) {
+    if (!catAoa[r].length) continue;
+    const bRef = XLSX.utils.encode_cell({ r, c: 1 });
+    if (wsCats[bRef]) wsCats[bRef].z = curFmt;
+    const cRef = XLSX.utils.encode_cell({ r, c: 2 });
+    if (wsCats[cRef]) wsCats[cRef].z = "0%";
+    const dRef = XLSX.utils.encode_cell({ r, c: 3 });
+    if (wsCats[dRef] && typeof wsCats[dRef].v === "number") wsCats[dRef].z = curFmt;
+  }
+  XLSX.utils.book_append_sheet(wb, wsCats, "By category");
+
+  // ---- Who owes what: each family's exact share ----
+  const owesHeader = ["Family", "Catering heads", `Share (${cur})`, "Paid?"];
+  const owesAoa = [owesHeader];
+  statsSource.forEach((a) => {
+    const w = cateringWeight(a);
+    owesAoa.push([a.familyName || "", w, w * perHead, a.paid ? "Yes" : "No"]);
+  });
+  owesAoa.push([]);
+  owesAoa.push(["TOTAL", t.cateringHeads, grand, ""]);
+  const wsOwes = XLSX.utils.aoa_to_sheet(owesAoa);
+  wsOwes["!cols"] = [{ wch: 24 }, { wch: 15 }, { wch: 13 }, { wch: 8 }];
+  for (let r = 1; r < owesAoa.length; r++) {
+    const ref = XLSX.utils.encode_cell({ r, c: 2 });
+    if (wsOwes[ref] && typeof wsOwes[ref].v === "number") wsOwes[ref].z = curFmt;
+  }
+  XLSX.utils.book_append_sheet(wb, wsOwes, "Who owes what");
+
+  const fileName = `${(eventInfo.eventName || "event").replace(/[^a-z0-9]+/gi, "_")}_budget.xlsx`;
+  const wbout = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+  const blob = new Blob([wbout], { type: "application/octet-stream" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  showToast("Excel downloaded — share it with the committee");
 }
 
 // =============================================================================
@@ -3445,6 +3600,35 @@ function attendeeWhatsappHref(a) {
   const digits = a.phone.replace(/[^\d+]/g, "").replace(/^\+/, "");
   if (!digits) return "";
   const text = encodeURIComponent(`Hi ${a.familyName}! ` + reminderMessageText());
+  return `https://wa.me/${digits}?text=${text}`;
+}
+
+// Per-family "here's your share" message for the Budget tab's cost-split
+// list — distinct from the general event reminder above. Includes the
+// optional payment note (UPI/bank/PayID etc.) from Settings when set, so
+// a family can pay straight from the message without asking the committee
+// how.
+function costSplitMessageText(a, share, w, perHead) {
+  const name = eventInfo.eventName || "our get-together";
+  const start = eventStartDateTime();
+  const dateStr = start
+    ? start.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })
+    : "";
+  let msg = `Hi ${a.familyName}! For ${name}`;
+  if (dateStr) msg += ` on ${dateStr}`;
+  msg += `, your family's share comes to ${fmtMoney(share)} (${formatWeight(w)} catering head${
+    w === 1 ? "" : "s"
+  } × ${fmtMoney(perHead)}/head).`;
+  if (eventInfo.paymentNote && eventInfo.paymentNote.trim()) msg += ` ${eventInfo.paymentNote.trim()}`;
+  msg += " Thank you! 🙏";
+  return msg;
+}
+
+function costSplitWhatsappHref(a, share, w, perHead) {
+  if (!a || !a.phone) return "";
+  const digits = a.phone.replace(/[^\d+]/g, "").replace(/^\+/, "");
+  if (!digits) return "";
+  const text = encodeURIComponent(costSplitMessageText(a, share, w, perHead));
   return `https://wa.me/${digits}?text=${text}`;
 }
 
