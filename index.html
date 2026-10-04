@@ -347,18 +347,17 @@
     <!-- ============ REPORT ============ -->
     <section id="tab-report" class="tab-panel">
       <div class="panel-head">
-        <h2>📊 Budget report</h2>
+        <h2>📊 Money tracker</h2>
         <button class="btn btn-primary" id="reportExportExcelBtn">⬇️ Download Excel</button>
       </div>
-      <p class="muted report-intro">A live, always-current view of the same numbers as the Excel export — bookmark or share this tab with the committee instead of a file that goes out of date.</p>
+      <p class="muted report-intro">A live snapshot of who owes what and who's still owed back — updates automatically, nothing to re-download.</p>
 
       <div class="grid stats-grid compact">
         <div class="stat-card highlight"><div class="stat-label">Total expenses</div><div class="stat-value" id="reportGrandTotal">$0</div></div>
-        <div class="stat-card"><div class="stat-label">Catering heads</div><div class="stat-value" id="reportHeads">0</div></div>
         <div class="stat-card"><div class="stat-label">Cost / catering head</div><div class="stat-value" id="reportPerHead">$0</div></div>
-        <div class="stat-card"><div class="stat-label">Collected from families</div><div class="stat-value" id="reportCollected">$0</div></div>
-        <div class="stat-card"><div class="stat-label">Still outstanding</div><div class="stat-value" id="reportOutstanding">$0</div></div>
-        <div class="stat-card"><div class="stat-label">Owed to committee</div><div class="stat-value" id="reportOwedCommittee">$0</div></div>
+        <div class="stat-card"><div class="stat-label">Collected</div><div class="stat-value" id="reportCollected">$0</div></div>
+        <div class="stat-card"><div class="stat-label">Outstanding</div><div class="stat-value" id="reportOutstanding">$0</div></div>
+        <div class="stat-card"><div class="stat-label">Owed back</div><div class="stat-value" id="reportOwedCommittee">$0</div></div>
       </div>
 
       <div class="card" id="reportMathCard">
@@ -366,39 +365,23 @@
         <div id="reportMathExplainer" class="report-explainer"></div>
       </div>
 
-      <div class="card">
-        <h3 class="report-card-title">By category</h3>
-        <div id="reportCategoryBreakdown" class="category-breakdown"></div>
-      </div>
-
-      <div class="card">
-        <h3 class="report-card-title">🤝 Who owes what</h3>
-        <div class="cost-split-summary" id="reportCostSplitSummary">Add attendees and expenses to calculate shares.</div>
-        <div id="reportCostSplitList" class="cost-split-list"></div>
-      </div>
-
-      <div class="card">
-        <h3 class="report-card-title">💳 Owed to committee</h3>
-        <div class="cost-split-summary" id="reportReimbursementsSummary">No reimbursements to track yet.</div>
-        <div id="reportReimbursementsList" class="cost-split-list"></div>
-      </div>
-
       <div class="card table-card">
-        <h3 class="report-card-title">🧾 Full expense ledger</h3>
+        <h3 class="report-card-title">🤝 Who owes &amp; who's owed</h3>
+        <p class="muted" style="margin:-4px 0 12px; font-size:0.84rem">Share = their catering cost. Spent = what they've paid for out of their own pocket. To be paid = what they still need to contribute. Owed = what should be paid back to them.</p>
         <div class="table-wrap">
-          <table class="data-table" id="reportExpenseTable">
+          <table class="data-table" id="reportLedgerTable">
             <thead>
               <tr>
-                <th>Item</th>
-                <th>Category</th>
-                <th>Estimated</th>
-                <th>Actual</th>
-                <th>Assigned to</th>
+                <th>Name</th>
+                <th>Share</th>
+                <th>Spent</th>
+                <th>To be paid</th>
+                <th>Owed</th>
                 <th>Status</th>
               </tr>
             </thead>
-            <tbody id="reportExpenseTableBody">
-              <tr class="empty-row"><td colspan="6">No expenses yet.</td></tr>
+            <tbody id="reportLedgerTableBody">
+              <tr class="empty-row"><td colspan="6">Add attendees and expenses to see the ledger.</td></tr>
             </tbody>
           </table>
         </div>
