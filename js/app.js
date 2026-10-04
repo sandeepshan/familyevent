@@ -807,6 +807,15 @@ function budgetItemTotal(b) {
 function budgetItemDone(b) {
   return typeof b.done === "boolean" ? b.done : b.status === "Purchased";
 }
+// Did a committee member pay for this out of their own pocket (needs
+// reimbursing from the collected funds), and has that reimbursement
+// happened yet? Both default to false for items that predate this field.
+function budgetItemPaidOOP(b) {
+  return b.paidOutOfPocket === true;
+}
+function budgetItemReimbursed(b) {
+  return b.reimbursed === true;
+}
 
 function initBudget() {
   const filterSel = $("#budgetCategoryFilter");
@@ -924,6 +933,7 @@ function renderBudget() {
   }
 
   renderCostSplit();
+  renderReimbursements();
 
   const body = $("#budgetTableBody");
   if (!filtered.length) {
@@ -1007,6 +1017,79 @@ function renderCostSplit() {
   $$("[data-paid]", listEl).forEach((cb) => {
     cb.addEventListener("change", () => {
       updateDoc(doc(db, "attendees", cb.dataset.paid), { paid: cb.checked }).catch((err) => {
+        console.error(err);
+        showToast("Couldn't update — check your connection");
+      });
+    });
+  });
+}
+
+// The flip side of "who owes what": expenses a committee member covered out
+// of their own pocket, grouped by who paid, so the committee knows who
+// still needs paying back from the collected funds. Reuses each budget
+// item's existing "Assigned to" field rather than a separate list, so
+// there's nothing extra to re-enter.
+function renderReimbursements() {
+  const summaryEl = $("#reimbursementsSummary");
+  const listEl = $("#reimbursementsList");
+  if (!summaryEl || !listEl) return;
+
+  const oopItems = budgetItems.filter((b) => budgetItemPaidOOP(b));
+  if (!oopItems.length) {
+    summaryEl.textContent = "No reimbursements to track yet.";
+    listEl.innerHTML = "";
+    return;
+  }
+
+  const totalOwed = oopItems.filter((b) => !budgetItemReimbursed(b)).reduce((s, b) => s + budgetItemTotal(b), 0);
+  const outstandingCount = oopItems.filter((b) => !budgetItemReimbursed(b)).length;
+  summaryEl.textContent =
+    totalOwed > 0
+      ? `${fmtMoney(totalOwed)} still owed back, across ${outstandingCount} expense${outstandingCount === 1 ? "" : "s"}`
+      : "Nothing outstanding — everyone's been reimbursed. ✅";
+
+  const groups = {};
+  oopItems.forEach((b) => {
+    const who = b.assignedTo || "Unassigned";
+    (groups[who] = groups[who] || []).push(b);
+  });
+
+  listEl.innerHTML = Object.entries(groups)
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([who, items]) => {
+      const outstanding = items.filter((b) => !budgetItemReimbursed(b)).reduce((s, b) => s + budgetItemTotal(b), 0);
+      const rows = items
+        .map((b) => {
+          const reimbursed = budgetItemReimbursed(b);
+          return `
+      <div class="cost-split-row">
+        <div>
+          <div class="cost-split-name">${escapeHtml(b.itemName)}</div>
+          <div class="cost-split-share">${fmtMoney(budgetItemTotal(b))}</div>
+        </div>
+        <label class="paid-checkbox-label">
+          <input type="checkbox" data-reimbursed="${b.id}" ${reimbursed ? "checked" : ""} />
+          ${reimbursed ? "Reimbursed" : "Owed"}
+        </label>
+      </div>`;
+        })
+        .join("");
+      return `
+    <div class="reimburse-group">
+      <div class="reimburse-group-head">
+        <strong>${escapeHtml(who)}</strong>
+        <span class="${outstanding > 0 ? "reimburse-group-owed" : "muted"}">${
+        outstanding > 0 ? fmtMoney(outstanding) + " owed" : "All reimbursed ✅"
+      }</span>
+      </div>
+      ${rows}
+    </div>`;
+    })
+    .join("");
+
+  $$("[data-reimbursed]", listEl).forEach((cb) => {
+    cb.addEventListener("change", () => {
+      updateDoc(doc(db, "budgetItems", cb.dataset.reimbursed), { reimbursed: cb.checked }).catch((err) => {
         console.error(err);
         showToast("Couldn't update — check your connection");
       });
@@ -1187,6 +1270,10 @@ function openBudgetModal(existing) {
       <span class="field-label" style="margin:0">✅ Already done / purchased</span>
       <span class="toggle-switch"><input type="checkbox" id="fBDone" ${existing && budgetItemDone(existing) ? "checked" : ""} /><span class="toggle-track"><span class="toggle-thumb"></span></span></span>
     </label>
+    <label class="toggle-row">
+      <span class="field-label" style="margin:0">💳 Paid out of pocket — needs reimbursement</span>
+      <span class="toggle-switch"><input type="checkbox" id="fBReimburse" ${existing && budgetItemPaidOOP(existing) ? "checked" : ""} /><span class="toggle-track"><span class="toggle-thumb"></span></span></span>
+    </label>
     <label class="field-label">Receipt photo <span class="muted">(optional)</span></label>
     ${
       existing?.receiptUrl
@@ -1212,6 +1299,7 @@ function openBudgetModal(existing) {
             price: parseFloat($("#fBPrice", root).value) || 0,
             assignedTo: $("#fBAssigned", root).value.trim(),
             done: $("#fBDone", root).checked,
+            paidOutOfPocket: $("#fBReimburse", root).checked,
           };
           const saveBtn = $("#bSave", root);
           const receiptFile = $("#fBReceipt", root).files[0];
@@ -1292,7 +1380,6 @@ function exportBudgetExcel() {
   const statsSource = confirmedOnly() ? attendees.filter((a) => a.rsvp === "Confirmed") : attendees;
   const t = attendeeTotals(statsSource);
   const perHead = t.cateringHeads > 0 ? grand / t.cateringHeads : 0;
-  const perAdult = t.adults > 0 ? grand / t.adults : 0;
   const start = eventStartDateTime();
   const dateStr = start
     ? start.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" })
@@ -1312,7 +1399,6 @@ function exportBudgetExcel() {
     ["TOTAL EXPENSES", grand],
     ["TOTAL CATERING HEADS (weighted)", t.cateringHeads],
     ["COST PER CATERING HEAD", perHead],
-    ["COST PER ADULT", perAdult],
     [],
     ["How the per-head cost is worked out:"],
     ["• Each adult counts as 1 catering head"],
@@ -1327,7 +1413,6 @@ function exportBudgetExcel() {
   [
     ["B8", grand],
     ["B10", perHead],
-    ["B11", perAdult],
   ].forEach(([ref]) => {
     if (wsSummary[ref]) wsSummary[ref].z = curFmt;
   });
@@ -1399,6 +1484,31 @@ function exportBudgetExcel() {
     if (wsOwes[ref] && typeof wsOwes[ref].v === "number") wsOwes[ref].z = curFmt;
   }
   XLSX.utils.book_append_sheet(wb, wsOwes, "Who owes what");
+
+  // ---- Reimbursements: the flip side — what the committee owes back ----
+  const oopItems = budgetItems.filter((b) => budgetItemPaidOOP(b));
+  if (oopItems.length) {
+    const reimburseHeader = ["Paid by", "Item", `Amount (${cur})`, "Reimbursed?"];
+    const reimburseAoa = [reimburseHeader];
+    oopItems
+      .slice()
+      .sort((a, b) => (a.assignedTo || "").localeCompare(b.assignedTo || ""))
+      .forEach((b) => {
+        reimburseAoa.push([b.assignedTo || "Unassigned", b.itemName || "", budgetItemTotal(b), budgetItemReimbursed(b) ? "Yes" : "No"]);
+      });
+    const totalOOP = oopItems.reduce((s, b) => s + budgetItemTotal(b), 0);
+    const totalOutstanding = oopItems.filter((b) => !budgetItemReimbursed(b)).reduce((s, b) => s + budgetItemTotal(b), 0);
+    reimburseAoa.push([]);
+    reimburseAoa.push(["TOTAL", "", totalOOP, ""]);
+    reimburseAoa.push(["STILL OWED", "", totalOutstanding, ""]);
+    const wsReimburse = XLSX.utils.aoa_to_sheet(reimburseAoa);
+    wsReimburse["!cols"] = [{ wch: 20 }, { wch: 30 }, { wch: 13 }, { wch: 12 }];
+    for (let r = 1; r < reimburseAoa.length; r++) {
+      const ref = XLSX.utils.encode_cell({ r, c: 2 });
+      if (wsReimburse[ref] && typeof wsReimburse[ref].v === "number") wsReimburse[ref].z = curFmt;
+    }
+    XLSX.utils.book_append_sheet(wb, wsReimburse, "Reimbursements");
+  }
 
   const fileName = `${(eventInfo.eventName || "event").replace(/[^a-z0-9]+/gi, "_")}_budget.xlsx`;
   const wbout = XLSX.write(wb, { bookType: "xlsx", type: "array" });
