@@ -1162,12 +1162,68 @@ function buildCategoryBreakdownHtml() {
 }
 
 // =============================================================================
-// REPORT TAB — a read-only, always-current mirror of the Excel export, built
-// right into the app so every committee member can check the numbers without
-// downloading a file. Reuses the exact same figures as the Budget tab and
-// the Excel export, just presented as plain status pills instead of
-// editable checkboxes/inputs.
+// REPORT TAB ("Money tracker") — a single, people-first ledger: one row per
+// name, showing their catering share, what they've spent out of their own
+// pocket, what they still need to pay, and what should be paid back to them.
+// This intentionally does NOT repeat the Budget tab's item-by-item list or
+// category breakdown — it's a different view of the same underlying numbers
+// (also used by the Excel export), built for anyone to skim at a glance.
 // =============================================================================
+
+// One row per person: merges attendees (who owe a catering share) with
+// anyone who's spent money out of their own pocket (who may or may not also
+// be an attendee), matched by exact name — same matching rule used
+// everywhere else credit is netted.
+function buildReportLedgerRows(statsSource, perHead) {
+  const spentByKey = {};
+  budgetItems
+    .filter((b) => budgetItemPaidOOP(b))
+    .forEach((b) => {
+      const who = (b.assignedTo || "").trim();
+      if (!who) return;
+      const key = who.toLowerCase();
+      if (!spentByKey[key]) spentByKey[key] = { name: who, all: 0, unreimbursed: 0 };
+      spentByKey[key].all += budgetItemTotal(b);
+      if (!budgetItemReimbursed(b)) spentByKey[key].unreimbursed += budgetItemTotal(b);
+    });
+
+  const rows = new Map();
+  statsSource.forEach((a) => {
+    const key = (a.familyName || "").trim().toLowerCase();
+    const spent = spentByKey[key];
+    if (spent) delete spentByKey[key];
+    rows.set(key, {
+      name: a.familyName,
+      isAttendee: true,
+      share: cateringWeight(a) * perHead,
+      paid: !!a.paid,
+      spentAll: spent ? spent.all : 0,
+      unreimbursedCredit: spent ? spent.unreimbursed : 0,
+    });
+  });
+  // Anyone left over paid for something but isn't (or isn't yet) an attendee.
+  Object.values(spentByKey).forEach((s) => {
+    rows.set(s.name.toLowerCase(), {
+      name: s.name,
+      isAttendee: false,
+      share: 0,
+      paid: null,
+      spentAll: s.all,
+      unreimbursedCredit: s.unreimbursed,
+    });
+  });
+
+  return Array.from(rows.values())
+    .map((r) => {
+      const net = r.share - r.unreimbursedCredit;
+      const toBePaid = Math.max(0, net);
+      const owed = Math.max(0, -net);
+      const settled = owed === 0 && (toBePaid === 0 || r.paid === true);
+      return { ...r, toBePaid, owed, settled };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
 function renderReport() {
   if (!$("#tab-report")) return;
 
@@ -1178,22 +1234,15 @@ function renderReport() {
   const perHead = t.cateringHeads > 0 ? grand / t.cateringHeads : 0;
 
   $("#reportGrandTotal").textContent = fmtMoney(grand);
-  $("#reportHeads").textContent = formatWeight(t.cateringHeads);
   $("#reportPerHead").textContent = t.cateringHeads > 0 ? fmtMoney(perHead) : "—";
 
-  let collected = 0;
-  let outstanding = 0;
-  statsSource.forEach((a) => {
-    const netShare = cateringWeight(a) * perHead - reimbursementCredit(a.familyName);
-    if (a.paid) collected += netShare;
-    else outstanding += netShare;
-  });
+  const rows = buildReportLedgerRows(statsSource, perHead);
+  const collected = rows.filter((r) => r.paid === true).reduce((s, r) => s + r.toBePaid, 0);
+  const outstanding = rows.filter((r) => r.paid !== true).reduce((s, r) => s + r.toBePaid, 0);
+  const owedBack = rows.reduce((s, r) => s + r.owed, 0);
   $("#reportCollected").textContent = fmtMoney(collected);
   $("#reportOutstanding").textContent = fmtMoney(outstanding);
-
-  const oopItems = budgetItems.filter((b) => budgetItemPaidOOP(b));
-  const owedCommittee = oopItems.filter((b) => !budgetItemReimbursed(b)).reduce((s, b) => s + budgetItemTotal(b), 0);
-  $("#reportOwedCommittee").textContent = fmtMoney(owedCommittee);
+  $("#reportOwedCommittee").textContent = fmtMoney(owedBack);
 
   const doneCount = budgetItems.filter((b) => budgetItemDone(b)).length;
   const variance =
@@ -1206,137 +1255,31 @@ function renderReport() {
     ? `
     <p>Each adult counts as 1 catering head, each kid aged 5–12 as 0.5, and kids under 5 are free.</p>
     <p>Cost per head = total expenses ÷ total weighted catering heads = ${fmtMoney(grand)} ÷ ${formatWeight(t.cateringHeads)} = <strong>${fmtMoney(perHead)}</strong> per head.</p>
-    <p>A family's share = their own weighted heads × cost per head, minus any credit for expenses a committee member from that family already covered out of pocket.</p>
+    <p>A family's share = their own weighted heads × cost per head, minus anything they've already spent out of their own pocket that hasn't been paid back yet.</p>
     ${variance}
     <p>${doneCount} of ${budgetItems.length} expense${budgetItems.length === 1 ? "" : "s"} purchased so far.</p>
   `
     : `<p>Add some expenses on the Budget tab to see the math here.</p>`;
 
-  $("#reportCategoryBreakdown").innerHTML = buildCategoryBreakdownHtml();
-  renderReportCostSplit(statsSource, perHead, grand);
-  renderReportReimbursements(oopItems);
-  renderReportLedger();
+  const body = $("#reportLedgerTableBody");
+  if (!rows.length) {
+    body.innerHTML = `<tr class="empty-row"><td colspan="6">Add attendees and expenses to see the ledger.</td></tr>`;
+  } else {
+    body.innerHTML = rows
+      .map((r) => {
+        return `<tr>
+        <td data-label="Name"><strong>${escapeHtml(r.name)}</strong></td>
+        <td data-label="Share">${r.isAttendee ? fmtMoney(r.share) : "—"}</td>
+        <td data-label="Spent">${r.spentAll > 0 ? fmtMoney(r.spentAll) : "—"}</td>
+        <td data-label="To be paid">${r.toBePaid > 0 ? fmtMoney(r.toBePaid) : "—"}</td>
+        <td data-label="Owed">${r.owed > 0 ? fmtMoney(r.owed) : "—"}</td>
+        <td data-label="Status"><span class="status-pill ${r.settled ? "good" : "bad"}">${r.settled ? "✅ Settled" : "🔴 Pending"}</span></td>
+      </tr>`;
+      })
+      .join("");
+  }
 
   $("#reportUpdatedAt").textContent = `Live — last refreshed ${new Date().toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}`;
-}
-
-function renderReportCostSplit(statsSource, perHead, grand) {
-  const summaryEl = $("#reportCostSplitSummary");
-  const listEl = $("#reportCostSplitList");
-  if (!summaryEl || !listEl) return;
-  if (!statsSource.length || grand <= 0 || perHead <= 0) {
-    summaryEl.textContent = "Add attendees and expenses to calculate shares.";
-    listEl.innerHTML = "";
-    return;
-  }
-  summaryEl.textContent = `${fmtMoney(perHead)} per catering head × ${formatWeight(attendeeTotals(statsSource).cateringHeads)} heads = ${fmtMoney(grand)} total`;
-  listEl.innerHTML = statsSource
-    .map((a) => {
-      const w = cateringWeight(a);
-      const grossShare = w * perHead;
-      const credit = reimbursementCredit(a.familyName);
-      const netShare = grossShare - credit;
-      const creditLine =
-        credit > 0
-          ? `<div class="cost-split-credit">− ${fmtMoney(credit)} already covered for expenses → <strong>${
-              netShare >= 0 ? fmtMoney(netShare) + " net due" : fmtMoney(-netShare) + " owed back to them"
-            }</strong></div>`
-          : "";
-      return `
-    <div class="cost-split-row">
-      <div>
-        <div class="cost-split-name">${escapeHtml(a.familyName)}</div>
-        <div class="cost-split-share">${formatWeight(w)} heads · ${fmtMoney(grossShare)}</div>
-        ${creditLine}
-      </div>
-      <span class="status-pill ${a.paid ? "good" : "bad"}">${a.paid ? "✅ Paid" : "🔴 Unpaid"}</span>
-    </div>`;
-    })
-    .join("");
-}
-
-function renderReportReimbursements(oopItems) {
-  const summaryEl = $("#reportReimbursementsSummary");
-  const listEl = $("#reportReimbursementsList");
-  if (!summaryEl || !listEl) return;
-  if (!oopItems.length) {
-    summaryEl.textContent = "No reimbursements to track yet.";
-    listEl.innerHTML = "";
-    return;
-  }
-  const totalOwed = oopItems.filter((b) => !budgetItemReimbursed(b)).reduce((s, b) => s + budgetItemTotal(b), 0);
-  const outstandingCount = oopItems.filter((b) => !budgetItemReimbursed(b)).length;
-  summaryEl.textContent =
-    totalOwed > 0
-      ? `${fmtMoney(totalOwed)} still owed back, across ${outstandingCount} expense${outstandingCount === 1 ? "" : "s"}`
-      : "Nothing outstanding — everyone's been reimbursed. ✅";
-
-  const groups = {};
-  oopItems.forEach((b) => {
-    const who = b.assignedTo || "Unassigned";
-    (groups[who] = groups[who] || []).push(b);
-  });
-
-  listEl.innerHTML = Object.entries(groups)
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([who, items]) => {
-      const outstanding = items.filter((b) => !budgetItemReimbursed(b)).reduce((s, b) => s + budgetItemTotal(b), 0);
-      const rows = items
-        .map((b) => {
-          const reimbursed = budgetItemReimbursed(b);
-          return `
-      <div class="cost-split-row">
-        <div>
-          <div class="cost-split-name">${escapeHtml(b.itemName)}</div>
-          <div class="cost-split-share">${fmtMoney(budgetItemTotal(b))}</div>
-        </div>
-        <span class="status-pill ${reimbursed ? "good" : "bad"}">${reimbursed ? "✅ Reimbursed" : "🔴 Owed"}</span>
-      </div>`;
-        })
-        .join("");
-      return `
-    <div class="reimburse-group">
-      <div class="reimburse-group-head">
-        <strong>${escapeHtml(who)}</strong>
-        <span class="${outstanding > 0 ? "reimburse-group-owed" : "muted"}">${
-        outstanding > 0 ? fmtMoney(outstanding) + " owed" : "All reimbursed ✅"
-      }</span>
-      </div>
-      ${rows}
-    </div>`;
-    })
-    .join("");
-}
-
-function renderReportLedger() {
-  const body = $("#reportExpenseTableBody");
-  if (!body) return;
-  if (!budgetItems.length) {
-    body.innerHTML = `<tr class="empty-row"><td colspan="6">No expenses yet.</td></tr>`;
-    return;
-  }
-  const sorted = budgetItems
-    .slice()
-    .sort((a, b) => (a.category || "").localeCompare(b.category || "") || (a.itemName || "").localeCompare(b.itemName || ""));
-  body.innerHTML = sorted
-    .map((b) => {
-      const estimated = budgetItemEstimated(b);
-      const actual = budgetItemActual(b);
-      const done = budgetItemDone(b);
-      return `<tr class="${done ? "row-done" : ""}">
-        <td data-label="Item"><strong>${escapeHtml(b.itemName)}</strong></td>
-        <td data-label="Category">${CATEGORY_ICONS[b.category] || "📦"} ${escapeHtml(b.category || "")}</td>
-        <td data-label="Estimated" class="${actual !== null ? "muted strikethrough" : ""}">${fmtMoney(estimated)}</td>
-        <td data-label="Actual">${actual !== null ? fmtMoney(actual) : "—"}</td>
-        <td data-label="Assigned to" class="muted">${b.assignedTo ? escapeHtml(b.assignedTo) : "—"}${
-          budgetItemPaidOOP(b)
-            ? ` <span class="oop-badge" title="${budgetItemReimbursed(b) ? "Paid out of pocket — already reimbursed" : "Paid out of pocket — needs reimbursement"}">${budgetItemReimbursed(b) ? "💳✓" : "💳"}</span>`
-            : ""
-        }</td>
-        <td data-label="Status">${done ? '<span class="status-pill good">✅ Done</span>' : '<span class="status-pill bad">Planned</span>'}</td>
-      </tr>`;
-    })
-    .join("");
 }
 
 // Draws a branded, shareable "who owes what" summary as a portrait image —
@@ -1798,7 +1741,7 @@ function exportBudgetExcel() {
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
-  showToast("Excel downloaded — share it with the committee");
+  showToast("Excel downloaded — share it with the group");
 }
 
 // =============================================================================
