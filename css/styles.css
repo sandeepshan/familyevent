@@ -637,6 +637,22 @@ tr.row-done td { opacity: 0.6; }
 .category-row.over-cap .cat-bar-fill { background: linear-gradient(90deg, var(--red), var(--magenta-deep)); }
 .cat-cap-note { font-size: 0.7rem; color: var(--ink-soft); }
 
+/* ---------- Message tab ---------- */
+.message-intro { margin-top: -6px; margin-bottom: 14px; font-size: 0.86rem; }
+.message-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+.message-actions .btn { flex: 1 1 150px; }
+.message-card { padding: 20px; }
+.message-preview {
+  white-space: pre-wrap;
+  font-family: var(--font-body);
+  font-size: 0.92rem;
+  line-height: 1.65;
+  color: var(--ink);
+  background: var(--cream-deep);
+  border-radius: var(--radius-sm);
+  padding: 16px 18px;
+}
+
 /* ---------- Schedule tab ---------- */
 .schedule-window {
   background: linear-gradient(135deg, var(--cream-deep), #fff);
