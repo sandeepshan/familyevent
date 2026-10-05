@@ -545,6 +545,14 @@ function confirmedOnly() {
   return $("#confirmedOnlyToggle").checked;
 }
 
+// Fixed committee-decided $ per adult catering head, used everywhere a
+// family's cost share is shown or collected: the Report tab's "Money
+// tracker" ledger/stats/Share PNG/Excel export, the Payments tab's
+// individual follow-up messages, and the Message tab's broadcast. This is a
+// flat agreed rate, not derived from (and so not tied to) the live running
+// total of actual expenses on the Budget tab.
+const ADULT_HEAD_RATE = 36.5;
+
 // Catering headcount: adults count as a full head, kids 5-12 as half
 // (smaller portions), kids under 5 are free (don't move the needle on
 // catering quantities). Used to divide catering/budget costs fairly.
@@ -1168,10 +1176,13 @@ function renderReport() {
   const grandEstimated = budgetItems.reduce((s, b) => s + budgetItemEstimated(b), 0);
   const statsSource = confirmedOnly() ? attendees.filter((a) => a.rsvp === "Confirmed") : attendees;
   const t = attendeeTotals(statsSource);
-  const perHead = t.cateringHeads > 0 ? grand / t.cateringHeads : 0;
+  // Fixed committee-decided rate (same ADULT_HEAD_RATE the Payments tab
+  // uses), not derived from live expenses ÷ heads — so a family's share
+  // here always matches what the Payments tab quotes them.
+  const perHead = ADULT_HEAD_RATE;
 
   $("#reportGrandTotal").textContent = fmtMoney(grand);
-  $("#reportPerHead").textContent = t.cateringHeads > 0 ? fmtMoney(perHead) : "—";
+  $("#reportPerHead").textContent = fmtMoney(perHead);
 
   const rows = buildReportLedgerRows(statsSource, perHead);
   const collected = rows.filter((r) => r.paid === true).reduce((s, r) => s + r.toBePaid, 0);
@@ -1184,17 +1195,20 @@ function renderReport() {
   const formulaEl = $("#reportFormula");
   if (formulaEl) {
     formulaEl.innerHTML = t.cateringHeads > 0
-      ? `${fmtMoney(grand)} <span class="report-formula-op">÷</span> ${formatWeight(t.cateringHeads)} heads <span class="report-formula-op">=</span> <strong>${fmtMoney(perHead)}</strong> / head`
-      : "Add attendees and expenses to see the math.";
+      ? `<strong>${fmtMoney(perHead)}</strong> / head <span class="report-formula-op">×</span> ${formatWeight(t.cateringHeads)} heads <span class="report-formula-op">=</span> <strong>${fmtMoney(perHead * t.cateringHeads)}</strong> total due`
+      : "Add attendees to see the math.";
   }
   const doneCount = budgetItems.filter((b) => budgetItemDone(b)).length;
   const variance =
     grandEstimated !== grand
-      ? ` Actual costs are now ${fmtMoney(Math.abs(grand - grandEstimated))} ${grand > grandEstimated ? "higher" : "lower"} than the original estimate.`
+      ? ` Total expenses are now ${fmtMoney(Math.abs(grand - grandEstimated))} ${grand > grandEstimated ? "higher" : "lower"} than the original estimate.`
       : "";
-  $("#reportMathExplainer").innerHTML = budgetItems.length
-    ? `<p>A family's share is their weighted catering heads (adult = 1, kid 5–12 = 0.5, kid &lt;5 = free) × the cost per head, minus anything they've already spent out of pocket that hasn't been paid back.${variance}</p><p class="report-progress-note">${doneCount} of ${budgetItems.length} expense${budgetItems.length === 1 ? "" : "s"} purchased so far.</p>`
-    : `<p>Add some expenses on the Budget tab to see the math here.</p>`;
+  const progressNote = budgetItems.length
+    ? `<p class="report-progress-note">${doneCount} of ${budgetItems.length} expense${budgetItems.length === 1 ? "" : "s"} purchased so far.</p>`
+    : "";
+  $("#reportMathExplainer").innerHTML =
+    `<p>A family's share is their weighted catering heads (adult = 1, kid 5–12 = 0.5, kid &lt;5 = free) × the fixed ${fmtMoney(perHead)} per-head rate that's been agreed, minus anything they've already spent out of pocket that hasn't been paid back. This fixed rate doesn't change with the running total expenses below.${variance}</p>` +
+    progressNote;
 
   const body = $("#reportLedgerTableBody");
   if (!rows.length) {
@@ -1354,7 +1368,7 @@ async function shareCostSplitCard() {
   }
   showToast("Preparing your summary card…", 3000);
   try {
-    const perHead = grand / t.cateringHeads;
+    const perHead = ADULT_HEAD_RATE; // fixed committee-decided rate, not grand ÷ heads
     const canvas = buildCostSplitCardCanvas(statsSource, grand, perHead);
     const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
     const fileName = `${(eventInfo.eventName || "event").replace(/[^a-z0-9]+/gi, "_")}_who_owes_what.png`;
@@ -1528,7 +1542,7 @@ function exportBudgetExcel() {
   const grand = budgetGrandTotal(budgetItems);
   const statsSource = confirmedOnly() ? attendees.filter((a) => a.rsvp === "Confirmed") : attendees;
   const t = attendeeTotals(statsSource);
-  const perHead = t.cateringHeads > 0 ? grand / t.cateringHeads : 0;
+  const perHead = ADULT_HEAD_RATE; // fixed committee-decided rate, not grand ÷ heads
   const start = eventStartDateTime();
   const dateStr = start
     ? start.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" })
@@ -1547,14 +1561,14 @@ function exportBudgetExcel() {
     [],
     ["TOTAL EXPENSES", grand],
     ["TOTAL CATERING HEADS (weighted)", t.cateringHeads],
-    ["COST PER CATERING HEAD", perHead],
+    ["COST PER CATERING HEAD (fixed rate)", perHead],
     [],
     ["How the per-head cost is worked out:"],
     ["• Each adult counts as 1 catering head"],
     ["• Each kid aged 5–12 counts as 0.5 catering head"],
     ["• Each kid under 5 is free — 0 catering heads"],
-    ["• Cost per head = Total expenses ÷ total weighted catering heads"],
-    ["• A family's share = their own weighted heads × cost per head"],
+    [`• Cost per head is a fixed, agreed rate (currently ${cur}${perHead}) — it does not change with total expenses`],
+    ["• A family's share = their own weighted heads × the fixed cost per head"],
     [],
     ["See the 'Who owes what' tab for each family's exact share."],
   ]);
@@ -1636,7 +1650,11 @@ function exportBudgetExcel() {
     owesAoa.push([a.familyName || "", w, grossShare, credit, grossShare - credit, a.paid ? "Yes" : "No"]);
   });
   owesAoa.push([]);
-  owesAoa.push(["TOTAL", t.cateringHeads, grand, totalCredit, grand - totalCredit, ""]);
+  // Total share = sum of each family's fixed-rate share (heads × perHead),
+  // NOT the live budget `grand` total — the two no longer have to match now
+  // that perHead is a flat agreed rate rather than grand ÷ heads.
+  const totalShare = t.cateringHeads * perHead;
+  owesAoa.push(["TOTAL", t.cateringHeads, totalShare, totalCredit, totalShare - totalCredit, ""]);
   const wsOwes = XLSX.utils.aoa_to_sheet(owesAoa);
   wsOwes["!cols"] = [{ wch: 24 }, { wch: 15 }, { wch: 13 }, { wch: 13 }, { wch: 13 }, { wch: 8 }];
   for (let r = 1; r < owesAoa.length; r++) {
@@ -3979,10 +3997,10 @@ function messageDraftText() {
   const timeStr = eventTimeRangeLabel();
   const venue = eventInfo.venue || "";
 
-  const statsSource = confirmedOnly() ? attendees.filter((a) => a.rsvp === "Confirmed") : attendees;
-  const t = attendeeTotals(statsSource);
-  const grand = budgetGrandTotal(budgetItems);
-  const perHead = t.cateringHeads > 0 ? grand / t.cateringHeads : 0;
+  // Fixed, agreed rate — same ADULT_HEAD_RATE the Report and Payments tabs
+  // use, not the live budget total ÷ heads, so this broadcast always quotes
+  // the same figure those two tabs show.
+  const perHead = ADULT_HEAD_RATE;
 
   let when = "";
   if (dateStr) when += ` on *${dateStr}*`;
@@ -3993,19 +4011,11 @@ function messageDraftText() {
   msg += `.\n\n`;
 
   msg += `*💰 How we're splitting the cost*\n`;
-  msg += `To keep things simple and fair, the full cost of the day is being shared equally per catering head:\n`;
+  msg += `To keep things simple and fair, the cost is being shared equally per catering head, at a flat *${fmtMoney(perHead)} per head*:\n`;
   msg += `• Adults = 1 head\n`;
   msg += `• Kids 5–12 = half a head\n`;
   msg += `• Kids under 5 = free\n\n`;
-
-  if (t.cateringHeads > 0 && grand > 0) {
-    msg += `Right now: *${fmtMoney(grand)}* total expenses ÷ *${formatWeight(t.cateringHeads)} catering heads* = *${fmtMoney(
-      perHead
-    )} per head*.\n`;
-    msg += `So your family's share = (your number of heads) × ${fmtMoney(perHead)}. Message us directly if you'd like your exact family total worked out.\n\n`;
-  } else {
-    msg += `We'll share the exact per-head figure here once RSVPs and expenses are finalised — thanks for your patience!\n\n`;
-  }
+  msg += `So your family's share = (your number of heads) × ${fmtMoney(perHead)}. Message us directly if you'd like your exact family total worked out.\n\n`;
 
   msg += `*💳 How to pay*\n`;
   msg += `Please send your share via *PayID to 0420776804* by *${PAYMENT_DEADLINE_LABEL}*. 🙏\n\n`;
@@ -4047,12 +4057,10 @@ function initMessage() {
 // -----------------------------------------------------------------------------
 // Payments tab: individual, personalised follow-up messages confirming each
 // confirmed family's total — distinct from the Message tab's one-off group
-// broadcast above and from the Report tab's live budget-based "to be paid"
-// (which divides the actual running total by catering heads). This uses a
-// fixed $35/adult catering-head rate given directly for this message, not
-// the live budget total, so it won't move if expenses change later.
+// broadcast above. Uses the same fixed ADULT_HEAD_RATE (defined near
+// cateringWeight above) as the Report tab's "Money tracker" ledger now does,
+// so the figures quoted here always match what the Report tab shows.
 // -----------------------------------------------------------------------------
-const ADULT_HEAD_RATE = 36.5; // fixed $ per adult catering head for the payment-confirmation messages
 const PAYMENT_DEADLINE_LABEL = "Wednesday, 7 October 2026"; // fixed payment due date, given directly
 
 // Prefers the optional "contact's first name" field (set on the attendee
