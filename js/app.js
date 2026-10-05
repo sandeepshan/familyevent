@@ -1185,17 +1185,33 @@ function renderReport() {
   $("#reportPerHead").textContent = fmtMoney(perHead);
 
   const rows = buildReportLedgerRows(statsSource, perHead);
-  const collected = rows.filter((r) => r.paid === true).reduce((s, r) => s + r.toBePaid, 0);
-  const outstanding = rows.filter((r) => r.paid !== true).reduce((s, r) => s + r.toBePaid, 0);
+  // Collected + Outstanding always add up to exactly "heads × perHead" (the
+  // total due shown in the formula below) — every attendee's FULL gross
+  // share counts toward one or the other, never both and never neither.
+  // Someone whose own unreimbursed spending covers (or exceeds) their share
+  // has nothing left to collect, so their share counts as already Collected
+  // the moment that's true, regardless of a "Paid" checkbox — there's
+  // nothing to physically pay. Owed back is tracked separately (see the
+  // table below for who, and how much) and never reduces or inflates these
+  // two totals, so the simple heads × rate math always holds at a glance.
+  let collected = 0;
+  let outstanding = 0;
+  rows.forEach((r) => {
+    if (!r.isAttendee) return; // non-attendee spenders have no catering share
+    const coveredByOwnSpend = r.unreimbursedCredit >= r.share;
+    if (r.paid === true || coveredByOwnSpend) collected += r.share;
+    else outstanding += r.share;
+  });
   const owedBack = rows.reduce((s, r) => s + r.owed, 0);
   $("#reportCollected").textContent = fmtMoney(collected);
   $("#reportOutstanding").textContent = fmtMoney(outstanding);
   $("#reportOwedCommittee").textContent = fmtMoney(owedBack);
 
+  const totalDue = perHead * t.cateringHeads;
   const formulaEl = $("#reportFormula");
   if (formulaEl) {
     formulaEl.innerHTML = t.cateringHeads > 0
-      ? `<strong>${fmtMoney(perHead)}</strong> / head <span class="report-formula-op">×</span> ${formatWeight(t.cateringHeads)} heads <span class="report-formula-op">=</span> <strong>${fmtMoney(perHead * t.cateringHeads)}</strong> total due`
+      ? `<strong>${fmtMoney(perHead)}</strong> / head <span class="report-formula-op">×</span> ${formatWeight(t.cateringHeads)} heads <span class="report-formula-op">=</span> <strong>${fmtMoney(totalDue)}</strong> total due`
       : "Add attendees to see the math.";
   }
   const doneCount = budgetItems.filter((b) => budgetItemDone(b)).length;
@@ -1203,11 +1219,20 @@ function renderReport() {
     grandEstimated !== grand
       ? ` Total expenses are now ${fmtMoney(Math.abs(grand - grandEstimated))} ${grand > grandEstimated ? "higher" : "lower"} than the original estimate.`
       : "";
+  // Direct answer to "does this cover what we're actually spending?" — the
+  // one comparison people keep wanting to do in their head.
+  const gap = totalDue - grand;
+  const gapNote =
+    t.cateringHeads > 0
+      ? ` At the fixed rate, the ${fmtMoney(totalDue)} total due is ${fmtMoney(Math.abs(gap))} ${
+          gap >= 0 ? "more than" : "short of"
+        } the ${fmtMoney(grand)} actually spent so far.`
+      : "";
   const progressNote = budgetItems.length
     ? `<p class="report-progress-note">${doneCount} of ${budgetItems.length} expense${budgetItems.length === 1 ? "" : "s"} purchased so far.</p>`
     : "";
   $("#reportMathExplainer").innerHTML =
-    `<p>A family's share is their weighted catering heads (adult = 1, kid 5–12 = 0.5, kid &lt;5 = free) × the fixed ${fmtMoney(perHead)} per-head rate that's been agreed, minus anything they've already spent out of pocket that hasn't been paid back. This fixed rate doesn't change with the running total expenses below.${variance}</p>` +
+    `<p>A family's share is their weighted catering heads (adult = 1, kid 5–12 = 0.5, kid &lt;5 = free) × the fixed ${fmtMoney(perHead)} per-head rate that's been agreed — it doesn't change with the running total expenses below.${gapNote} Anyone who's already spent their own money gets that netted against their share in the table below, including being owed back if they've covered more than their share.${variance}</p>` +
     progressNote;
 
   const body = $("#reportLedgerTableBody");
