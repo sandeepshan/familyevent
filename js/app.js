@@ -809,6 +809,7 @@ const COMMITTEE_MEMBERS = [
   "Martin Kolattukudy",
   "Sojan Varghese",
   "Manoj Koova",
+  "Jaison Mathew",
 ];
 const CATEGORY_ICONS = {
   "Catering & Food": "🍛",
