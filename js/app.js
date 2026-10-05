@@ -233,6 +233,7 @@ function initSettings() {
       renderDashboard();
       renderBudget();
       renderSchedule();
+      renderPayments();
       maybeFetchWeather();
       refreshShareLinks();
     },
@@ -523,6 +524,7 @@ function initAttendees() {
       renderAttendees();
       renderDashboard();
       renderBudget();
+      renderPayments();
     },
     (err) => {
       console.error("attendees listener:", err);
@@ -662,6 +664,8 @@ function openAttendeeModal(existing) {
     <h3>${isEdit ? "✏️ Edit" : "➕ Add"} family / person</h3>
     <label class="field-label">Family or person name</label>
     <input class="input" id="fAttName" value="${escapeHtml(existing?.familyName || "")}" placeholder="e.g. The Sharmas" />
+    <label class="field-label">Contact's first name (optional)</label>
+    <input class="input" id="fAttContactFirst" value="${escapeHtml(existing?.contactFirstName || "")}" placeholder="e.g. Priya — used to personalise payment messages" />
     <label class="field-label">Phone number (optional)</label>
     <input class="input" id="fAttPhone" type="tel" value="${escapeHtml(existing?.phone || "")}" placeholder="e.g. +61 412 345 678" />
     <div class="field-row">
@@ -696,6 +700,7 @@ function openAttendeeModal(existing) {
           if (!familyName) return showToast("Please enter a name");
           const data = {
             familyName,
+            contactFirstName: $("#fAttContactFirst", root).value.trim(),
             phone: $("#fAttPhone", root).value.trim(),
             adults: parseInt($("#fAttAdults", root).value, 10) || 0,
             kids512: parseInt($("#fAttKids512", root).value, 10) || 0,
@@ -3948,13 +3953,13 @@ function messageDraftText() {
     msg += `Right now: *${fmtMoney(grand)}* total expenses ÷ *${formatWeight(t.cateringHeads)} catering heads* = *${fmtMoney(
       perHead
     )} per head*.\n`;
-    msg += `So your family's share = (your number of heads) × ${fmtMoney(perHead)}. Message me directly if you'd like your exact family total worked out.\n\n`;
+    msg += `So your family's share = (your number of heads) × ${fmtMoney(perHead)}. Message us directly if you'd like your exact family total worked out.\n\n`;
   } else {
     msg += `We'll share the exact per-head figure here once RSVPs and expenses are finalised — thanks for your patience!\n\n`;
   }
 
   msg += `*💳 How to pay*\n`;
-  msg += `Please send your share via *PayID to 0420776804* whenever suits - no rush, just sometime before the big day. 🙏\n\n`;
+  msg += `Please send your share via *PayID to 0420776804* by *${PAYMENT_DEADLINE_LABEL}*. 🙏\n\n`;
 
   msg += `*🎉 Can't wait for this one!*\n`;
   msg += `We're planning great conversations, plenty of bonding, fun family games, and delicious food. It's going to be such a special day together - thank you all for being part of it. See you there! ❤️`;
@@ -3987,6 +3992,139 @@ function initMessage() {
       console.error(err);
       showToast("Couldn't copy automatically — select and copy the text below");
     }
+  });
+}
+
+// -----------------------------------------------------------------------------
+// Payments tab: individual, personalised follow-up messages confirming each
+// confirmed family's total — distinct from the Message tab's one-off group
+// broadcast above and from the Report tab's live budget-based "to be paid"
+// (which divides the actual running total by catering heads). This uses a
+// fixed $35/adult catering-head rate given directly for this message, not
+// the live budget total, so it won't move if expenses change later.
+// -----------------------------------------------------------------------------
+const ADULT_HEAD_RATE = 35; // fixed $ per adult catering head for the payment-confirmation messages
+const PAYMENT_DEADLINE_LABEL = "Wednesday, 7 October 2026"; // fixed payment due date, given directly
+
+// Prefers the optional "contact's first name" field (set on the attendee
+// form) so the message can greet an actual person; falls back to the
+// family name (with a leading "The " stripped) read as a group, since we
+// don't want to invent a first name that was never given.
+function attendeeFirstName(a) {
+  const explicit = (a.contactFirstName || "").trim();
+  if (explicit) return explicit;
+  const stripped = (a.familyName || "").replace(/^the\s+/i, "").trim();
+  return stripped ? `${stripped} family` : "there";
+}
+
+function paymentHeadcountParts(a) {
+  const adults = Number(a.adults) || 0;
+  const kids512 = Number(a.kids512) || 0;
+  const kidsU5 = Number(a.kidsU5) || 0;
+  const parts = [];
+  if (adults) parts.push(`${adults} adult${adults === 1 ? "" : "s"}`);
+  if (kids512) parts.push(`${kids512} kid${kids512 === 1 ? "" : "s"} (5–12)`);
+  if (kidsU5) parts.push(`${kidsU5} under 5 (free)`);
+  return parts;
+}
+
+// Same adult=1 / kid 5-12=half / kid under 5=free weighting used everywhere
+// else in the app (cateringWeight), just priced at the fixed rate above
+// instead of the live budget total ÷ heads.
+function paymentAmount(a) {
+  return cateringWeight(a) * ADULT_HEAD_RATE;
+}
+
+// Worked-out multiplication, e.g. "$35×2 + $17.5×2" for 2 adults + 2 kids
+// (5-12) — kids under 5 are free so they never add a term here, even
+// though they still show up in the headcount breakdown text.
+function paymentCalcTerms(a) {
+  const adults = Number(a.adults) || 0;
+  const kids512 = Number(a.kids512) || 0;
+  const terms = [];
+  if (adults) terms.push(`${fmtMoney(ADULT_HEAD_RATE)}×${adults}`);
+  if (kids512) terms.push(`${fmtMoney(ADULT_HEAD_RATE / 2)}×${kids512}`);
+  return terms;
+}
+
+// Shortened, personalised follow-up to the Message tab's broadcast — skips
+// re-explaining the splitting logic (already covered there) and goes
+// straight to this family's worked-out number. Written as "we/us/our"
+// throughout, never "I/my" — this is a group effort, not sent by one person.
+function paymentMessageText(a) {
+  const name = eventInfo.eventName || "our family get-together";
+  const firstName = attendeeFirstName(a);
+  const parts = paymentHeadcountParts(a);
+  const breakdown = parts.length ? parts.join(" + ") : "your family";
+  const terms = paymentCalcTerms(a);
+  const amount = paymentAmount(a);
+  const calc = terms.length ? `${terms.join(" + ")} = *${fmtMoney(amount)}*` : `*${fmtMoney(amount)}*`;
+
+  let msg = `Hi ${firstName}! 👋 Following up on our earlier message about ${name} costs.\n\n`;
+  msg += `Your total (${breakdown}):\n${calc}\n\n`;
+  msg += `Please send this via *PayID to 0420776804* by *${PAYMENT_DEADLINE_LABEL}*. Thank you! 🙏\n\n`;
+  msg += `Can't wait to see you there! ❤️`;
+  return msg;
+}
+
+function paymentWhatsappHref(a) {
+  if (!a || !a.phone) return "";
+  const digits = a.phone.replace(/[^\d+]/g, "").replace(/^\+/, "");
+  if (!digits) return "";
+  const text = encodeURIComponent(paymentMessageText(a));
+  return `https://wa.me/${digits}?text=${text}`;
+}
+
+function paymentRowHtml(a) {
+  const waHref = paymentWhatsappHref(a);
+  const parts = paymentHeadcountParts(a);
+  return `<div class="payment-row" data-payment-row="${a.id}">
+    <div class="payment-row-head">
+      <span class="report-name-cell">
+        ${avatarHtml(a.familyName || attendeeFirstName(a))}
+        <strong>${escapeHtml(a.familyName)}</strong>
+        ${waHref ? `<a class="icon-action" href="${waHref}" target="_blank" rel="noopener" title="Send via WhatsApp">💬</a>` : ""}
+      </span>
+      <span class="payment-amount">${fmtMoney(paymentAmount(a))}</span>
+    </div>
+    <p class="muted payment-breakdown">${parts.length ? escapeHtml(parts.join(" + ")) : "No heads yet"}</p>
+    <div class="message-preview payment-preview">${escapeHtml(paymentMessageText(a))}</div>
+    <button class="btn btn-ghost payment-copy-btn" data-pay-copy="${a.id}">📋 Copy message</button>
+  </div>`;
+}
+
+function renderPayments() {
+  const list = $("#paymentsList");
+  if (!list) return;
+  const confirmed = attendees.filter((a) => a.rsvp === "Confirmed");
+  $("#paymentsConfirmedCount").textContent = confirmed.length;
+  const rateLabel = $("#paymentsRateLabel");
+  if (rateLabel) rateLabel.textContent = fmtMoney(ADULT_HEAD_RATE);
+  const deadlineLabel = $("#paymentsDeadlineLabel");
+  if (deadlineLabel) deadlineLabel.textContent = PAYMENT_DEADLINE_LABEL;
+
+  if (!confirmed.length) {
+    list.innerHTML = `<p class="muted empty-row">No confirmed attendees yet — messages will appear here as families confirm on the Attendees tab.</p>`;
+    return;
+  }
+  list.innerHTML = confirmed
+    .slice()
+    .sort((a, b) => (a.familyName || "").localeCompare(b.familyName || ""))
+    .map(paymentRowHtml)
+    .join("");
+
+  $$("[data-pay-copy]", list).forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const a = attendees.find((x) => x.id === btn.dataset.payCopy);
+      if (!a) return;
+      try {
+        await navigator.clipboard.writeText(paymentMessageText(a));
+        showToast(`Message for ${a.familyName} copied — paste it into WhatsApp`);
+      } catch (err) {
+        console.error(err);
+        showToast("Couldn't copy automatically — select and copy the text above");
+      }
+    });
   });
 }
 
