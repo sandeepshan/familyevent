@@ -1208,6 +1208,47 @@ function renderReport() {
   $("#reportOutstanding").textContent = fmtMoney(outstanding);
   $("#reportOwedCommittee").textContent = fmtMoney(owedBack);
 
+  // Ties Total expenses, Collected and Owed back into one reconciled story,
+  // using only values derived from the figures above (never recomputed
+  // independently), so the three numbers can never drift apart:
+  //   grand          = directlyPaid + oopTotalAll          (by definition)
+  //   oopTotalAll    = oopReimbursed + oopUnreimbursed      (by the 💳✓ flag)
+  //   oopUnreimbursed= selfOffset + owedBack                (always true: for
+  //     any person, min(credit,share) + max(0,credit-share) === credit)
+  // so oopReimbursed + selfOffset + owedBack === oopTotalAll exactly, always.
+  const oopItems = budgetItems.filter((b) => budgetItemPaidOOP(b));
+  const oopTotalAll = oopItems.reduce((s, b) => s + budgetItemTotal(b), 0);
+  const oopReimbursed = oopItems.filter((b) => budgetItemReimbursed(b)).reduce((s, b) => s + budgetItemTotal(b), 0);
+  const selfOffset = rows.reduce((s, r) => s + Math.min(r.unreimbursedCredit, r.share), 0);
+  const directlyPaid = grand - oopTotalAll;
+  const tieBody = $("#reportTieBody");
+  if (tieBody) {
+    if (oopTotalAll <= 0) {
+      tieBody.innerHTML = `<p class="report-explainer">All <strong>${fmtMoney(
+        grand
+      )}</strong> of expenses so far has been paid straight from collected funds — nothing has been fronted out of pocket, so there's nothing owed back.</p>`;
+    } else {
+      tieBody.innerHTML =
+        `<p class="report-explainer">Of the <strong>${fmtMoney(grand)}</strong> total expenses, <strong>${fmtMoney(
+          directlyPaid
+        )}</strong> was paid straight from collected funds and <strong>${fmtMoney(
+          oopTotalAll
+        )}</strong> was fronted personally by whoever paid for it (the 💳 items on the Budget tab). Here's what happened to that fronted money:</p>` +
+        `<div class="report-tie-rows">
+          <div class="report-tie-row"><span>Already paid back to them</span><strong>${fmtMoney(oopReimbursed)}</strong></div>
+          <div class="report-tie-row"><span>Offsets against their own family's share (see the table below for whose)</span><strong>${fmtMoney(
+            selfOffset
+          )}</strong></div>
+          <div class="report-tie-row highlight"><span>Still to pay back — this is the <strong>Owed back</strong> figure above</span><strong>${fmtMoney(
+            owedBack
+          )}</strong></div>
+        </div>
+        <p class="report-progress-note">Once a person's own spending fully covers their share, that share moves into Collected above with nothing left to physically pay — so Collected, Outstanding and Owed back can each move independently, but these three numbers always reconcile back to the ${fmtMoney(
+          grand
+        )} actually spent.</p>`;
+    }
+  }
+
   const totalDue = perHead * t.cateringHeads;
   const formulaEl = $("#reportFormula");
   if (formulaEl) {
