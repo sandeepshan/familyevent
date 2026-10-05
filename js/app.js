@@ -4007,14 +4007,17 @@ const ADULT_HEAD_RATE = 35; // fixed $ per adult catering head for the payment-c
 const PAYMENT_DEADLINE_LABEL = "Wednesday, 7 October 2026"; // fixed payment due date, given directly
 
 // Prefers the optional "contact's first name" field (set on the attendee
-// form) so the message can greet an actual person; falls back to the
-// family name (with a leading "The " stripped) read as a group, since we
-// don't want to invent a first name that was never given.
+// form) so the message can greet an actual person by just their first name;
+// falls back to the first word of the family name (with a leading "The "
+// stripped) rather than the whole family name, since we don't want to greet
+// someone with "Hi Binoy Joseph family!" — just "Hi Binoy". The greeting
+// itself adds "and family" after this, so this function only ever returns
+// a single first-name-like token.
 function attendeeFirstName(a) {
   const explicit = (a.contactFirstName || "").trim();
-  if (explicit) return explicit;
+  if (explicit) return explicit.split(/\s+/)[0];
   const stripped = (a.familyName || "").replace(/^the\s+/i, "").trim();
-  return stripped ? `${stripped} family` : "there";
+  return stripped ? stripped.split(/\s+/)[0] : "there";
 }
 
 function paymentHeadcountParts(a) {
@@ -4060,8 +4063,8 @@ function paymentMessageText(a) {
   const amount = paymentAmount(a);
   const calc = terms.length ? `${terms.join(" + ")} = *${fmtMoney(amount)}*` : `*${fmtMoney(amount)}*`;
 
-  let msg = `Hi ${firstName}! 👋 Following up on our earlier message about ${name} costs.\n\n`;
-  msg += `Your total (${breakdown}):\n${calc}\n\n`;
+  let msg = `Hi ${firstName} and family! 👋 Following up on our earlier message about ${name} costs.\n\n`;
+  msg += `Your cost for the event and headcount (${breakdown}):\n${calc}\n\n`;
   msg += `Please send this via *PayID to 0420776804* by *${PAYMENT_DEADLINE_LABEL}*. Thank you! 🙏\n\n`;
   msg += `Can't wait to see you there! ❤️`;
   return msg;
