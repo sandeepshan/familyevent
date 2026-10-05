@@ -4052,7 +4052,7 @@ function initMessage() {
 // fixed $35/adult catering-head rate given directly for this message, not
 // the live budget total, so it won't move if expenses change later.
 // -----------------------------------------------------------------------------
-const ADULT_HEAD_RATE = 35; // fixed $ per adult catering head for the payment-confirmation messages
+const ADULT_HEAD_RATE = 36.5; // fixed $ per adult catering head for the payment-confirmation messages
 const PAYMENT_DEADLINE_LABEL = "Wednesday, 7 October 2026"; // fixed payment due date, given directly
 
 // Prefers the optional "contact's first name" field (set on the attendee
