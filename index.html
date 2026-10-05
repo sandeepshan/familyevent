@@ -68,6 +68,7 @@
       <button class="tab-btn" data-tab="budget" role="tab" aria-selected="false">🧾 <span>Budget</span></button>
       <button class="tab-btn" data-tab="report" role="tab" aria-selected="false">📊 <span>Report</span></button>
       <button class="tab-btn" data-tab="message" role="tab" aria-selected="false">💬 <span>Message</span></button>
+      <button class="tab-btn" data-tab="payments" role="tab" aria-selected="false">📩 <span>Payments</span></button>
       <button class="tab-btn" data-tab="schedule" role="tab" aria-selected="false">🗓️ <span>Schedule</span></button>
       <button class="tab-btn" data-tab="photos" role="tab" aria-selected="false">📸 <span>Photos</span></button>
       <button class="tab-btn" data-tab="games" role="tab" aria-selected="false">🎉 <span>Games</span></button>
@@ -379,6 +380,18 @@
 
       <div class="card message-card">
         <div class="message-preview" id="messagePreview">Add attendees and expenses to draft the message.</div>
+      </div>
+    </section>
+
+    <!-- ============ PAYMENTS ============ -->
+    <section id="tab-payments" class="tab-panel">
+      <div class="panel-head">
+        <h2>📩 Confirm payment</h2>
+      </div>
+      <p class="muted message-intro">A personalised follow-up for each confirmed family (<span id="paymentsConfirmedCount">0</span> so far), confirming their exact total at <strong id="paymentsRateLabel">$0</strong>/adult catering head, due <strong id="paymentsDeadlineLabel"></strong> — copy or send individually once you're ready to collect.</p>
+
+      <div id="paymentsList" class="payments-list">
+        <p class="muted empty-row">No confirmed attendees yet — messages will appear here as families confirm on the Attendees tab.</p>
       </div>
     </section>
 
