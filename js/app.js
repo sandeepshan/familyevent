@@ -1849,6 +1849,11 @@ function confirmDeleteSchedule(id) {
 // =============================================================================
 let photos = [];
 let photoWallOpen = false;
+// Optional manual re-order (an array of photo ids) set by the "Shuffle order"
+// button, so the PowerPoint export doesn't have to use upload order — which
+// tends to bunch consecutive uploads of the same activity together. null
+// means "no shuffle applied yet, use the default order".
+let photoExportOrder = null;
 
 function initPhotos() {
   const ref = query(collection(db, "photos"), orderBy("createdAt", "asc"));
@@ -1870,6 +1875,7 @@ function initPhotos() {
   $("#photoInput").addEventListener("change", (e) => handlePhotoUpload(e.target.files));
   $("#slideshowBtn").addEventListener("click", () => openSlideshow(0));
   $("#downloadAllBtn").addEventListener("click", downloadAllPhotosZip);
+  $("#shufflePhotosBtn").addEventListener("click", shufflePhotoOrder);
   $("#downloadPptxBtn").addEventListener("click", downloadPhotosPptx);
   $("#downloadKeepsakeBtn").addEventListener("click", downloadKeepsakePdf);
   $("#photoWallBtn").addEventListener("click", openPhotoWall);
@@ -1881,6 +1887,44 @@ function initPhotos() {
       renderPhotos();
     });
   });
+}
+
+// Fisher-Yates shuffle of the current photo order, saved as a list of ids
+// (not a sort key on the photo docs themselves — this is a local, exportonly
+// re-order, not something written back to Firestore). Re-shuffling anytime
+// gives a fresh random order.
+function shufflePhotoOrder() {
+  if (!photos.length) return showToast("No photos to shuffle yet");
+  const ids = photos.map((p) => p.id);
+  for (let i = ids.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [ids[i], ids[j]] = [ids[j], ids[i]];
+  }
+  photoExportOrder = ids;
+  showToast("Photo order shuffled — ready to export!");
+}
+
+// Resolves the shuffled order (if any) against the live `photos` list: keeps
+// only ids that still exist, in their shuffled positions, then appends any
+// photo not covered by the shuffle (e.g. uploaded after the last shuffle) in
+// its normal order at the end, so nothing is ever silently dropped from an
+// export. Falls back to the plain photos list when no shuffle is active.
+function photosInExportOrder() {
+  if (!photoExportOrder) return photos;
+  const byId = new Map(photos.map((p) => [p.id, p]));
+  const seen = new Set();
+  const ordered = [];
+  photoExportOrder.forEach((id) => {
+    const p = byId.get(id);
+    if (p) {
+      ordered.push(p);
+      seen.add(id);
+    }
+  });
+  photos.forEach((p) => {
+    if (!seen.has(p.id)) ordered.push(p);
+  });
+  return ordered;
 }
 
 // ---- Photo Wall (fullscreen TV display mode) ----
@@ -2353,8 +2397,13 @@ async function downloadPhotosPptx() {
       x: 0.5, y: 3.6, w: W - 1, h: 0.5, align: "center", fontSize: 13, italic: true, color: GOLD_LIGHT,
     });
 
-    // Highlights (liked photos) first, so the deck opens with its best moments.
-    const ordered = [...photos].sort((a, b) => (b.likedBy || []).length - (a.likedBy || []).length);
+    // If a manual shuffle is active (via the "Shuffle order" button), use that
+    // order as-is — the whole point is to break up consecutive same-activity
+    // photos, so don't re-sort it back by likes. Otherwise, default to
+    // highlights (liked photos) first, so the deck opens with its best moments.
+    const ordered = photoExportOrder
+      ? photosInExportOrder()
+      : [...photos].sort((a, b) => (b.likedBy || []).length - (a.likedBy || []).length);
 
     let i = 0;
     let failCount = 0;
