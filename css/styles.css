@@ -605,6 +605,21 @@ tr.row-done td { opacity: 0.6; }
   margin-bottom: 12px;
 }
 .report-formula-op { color: var(--ink-soft); font-weight: 400; margin: 0 4px; }
+.report-tie-rows { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+.report-tie-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  background: var(--cream-deep);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  font-size: 0.84rem;
+}
+.report-tie-row span { color: var(--ink-soft); }
+.report-tie-row strong { white-space: nowrap; font-family: var(--font-display); }
+.report-tie-row.highlight { background: color-mix(in srgb, var(--gold) 18%, var(--white)); }
+.report-tie-row.highlight span { color: var(--ink); font-weight: 600; }
 .status-pill { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 0.76rem; font-weight: 700; white-space: nowrap; }
 .status-pill.good { background: rgba(46, 160, 110, 0.15); color: var(--green); }
 .status-pill.bad { background: rgba(216, 70, 70, 0.12); color: var(--red); }
@@ -652,6 +667,24 @@ tr.row-done td { opacity: 0.6; }
   border-radius: var(--radius-sm);
   padding: 16px 18px;
 }
+
+/* ---------- Payments tab ---------- */
+.payments-list { display: flex; flex-direction: column; gap: 14px; }
+.payment-row {
+  background: var(--white);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 16px;
+}
+.payment-row-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 4px; }
+.payment-amount { font-family: var(--font-display); font-weight: 700; font-size: 1.15rem; color: var(--peacock-dark); white-space: nowrap; }
+.payment-breakdown { font-size: 0.8rem; margin: 0 0 10px; }
+.payment-preview {
+  font-size: 0.86rem;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+}
+.payment-copy-btn { width: 100%; }
 
 /* ---------- Schedule tab ---------- */
 .schedule-window {
