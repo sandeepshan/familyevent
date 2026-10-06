@@ -347,7 +347,11 @@
 
       <div class="card table-card">
         <h3 class="report-card-title">🤝 Who owes &amp; who's owed</h3>
-        <p class="muted report-legend">Share = catering cost. Spent = paid out of their own pocket. To be paid / Owed = what's still outstanding, either way.</p>
+        <p class="muted report-legend">Share = catering cost. Spent = paid out of their own pocket. To be paid / Owed = what's still outstanding, either way. Grouped below by what's left to do — biggest amounts first.</p>
+        <div class="table-toolbar">
+          <input type="search" id="reportLedgerSearch" placeholder="🔍 Search by name…" class="input" />
+          <div class="report-ledger-summary" id="reportLedgerSummary"></div>
+        </div>
         <div class="table-wrap">
           <table class="data-table" id="reportLedgerTable">
             <thead>
@@ -357,11 +361,10 @@
                 <th>Spent</th>
                 <th>To be paid</th>
                 <th>Owed</th>
-                <th>Status</th>
               </tr>
             </thead>
             <tbody id="reportLedgerTableBody">
-              <tr class="empty-row"><td colspan="6">Add attendees and expenses to see the ledger.</td></tr>
+              <tr class="empty-row"><td colspan="5">Add attendees and expenses to see the ledger.</td></tr>
             </tbody>
           </table>
         </div>
