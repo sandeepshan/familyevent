@@ -895,6 +895,7 @@ function initBudget() {
   $("#setCapsBtn").addEventListener("click", openCategoryCapsModal);
   $("#reportShareBtn")?.addEventListener("click", shareCostSplitCard);
   $("#reportExportExcelBtn")?.addEventListener("click", exportBudgetExcel);
+  $("#reportLedgerSearch")?.addEventListener("input", renderReport);
 }
 
 function openCategoryCapsModal() {
@@ -1146,7 +1147,12 @@ function reportLedgerRowHtml(r, perHead) {
   const w = r.attendee ? cateringWeight(r.attendee) : 0;
   const net = r.share - r.unreimbursedCredit;
   const waHref = r.attendee ? costSplitWhatsappHref(r.attendee, net, w, perHead, r.unreimbursedCredit) : "";
-  return `<tr class="${r.settled ? "report-row-settled" : "report-row-pending"}">
+  // Which bucket a row is in (to collect / to pay back / settled) is now
+  // shown by the section header it sits under, so the row itself no longer
+  // repeats a "Pending"/"Settled" status pill — just a matching left-border
+  // accent colour, kept for a quick scan while scrolling past a header.
+  const rowClass = r.settled ? "report-row-settled" : r.owed > 0 ? "report-row-owed" : "report-row-pending";
+  return `<tr class="${rowClass}">
     <td data-label="Name">
       <span class="report-name-cell">
         ${avatarHtml(r.name)}
@@ -1158,16 +1164,22 @@ function reportLedgerRowHtml(r, perHead) {
     <td data-label="Spent">${r.spentAll > 0 ? fmtMoney(r.spentAll) : "—"}</td>
     <td data-label="To be paid">${
       r.toBePaid > 0
-        ? `<span class="report-cell-stack"><span class="report-amount">${fmtMoney(r.toBePaid)}</span><label class="paid-checkbox-label"><input type="checkbox" data-report-paid="${r.attendee.id}" ${r.paid ? "checked" : ""} /> Paid</label></span>`
+        ? `<span class="report-cell-stack"><span class="report-amount">${fmtMoney(r.toBePaid)}</span><label class="paid-checkbox-label"><input type="checkbox" data-report-paid="${r.attendee.id}" ${r.paid ? "checked" : ""} /> Mark paid</label></span>`
         : "—"
     }</td>
     <td data-label="Owed">${
       r.owed > 0
-        ? `<span class="report-cell-stack"><span class="report-amount">${fmtMoney(r.owed)}</span><label class="paid-checkbox-label"><input type="checkbox" data-report-reimburse="${r.unreimbursedIds.join(",")}" /> Paid back</label></span>`
+        ? `<span class="report-cell-stack"><span class="report-amount">${fmtMoney(r.owed)}</span><label class="paid-checkbox-label"><input type="checkbox" data-report-reimburse="${r.unreimbursedIds.join(",")}" /> Mark paid back</label></span>`
         : "—"
     }</td>
-    <td data-label="Status"><span class="status-pill ${r.settled ? "good" : "bad"}">${r.settled ? "✅ Settled" : "🔴 Pending"}</span></td>
   </tr>`;
+}
+
+// One colspan header row marking the start of a group of ledger rows —
+// splits the single flat list into "what needs doing" buckets so someone
+// scanning a long committee list doesn't have to read every row's status.
+function reportSectionRowHtml(cls, label, count) {
+  return `<tr class="report-section-row ${cls}"><td colspan="5">${label} <span class="report-section-count">${count}</span></td></tr>`;
 }
 
 function renderReport() {
@@ -1277,11 +1289,47 @@ function renderReport() {
     `<p>A family's share is their weighted catering heads (adult = 1, kid 5–12 = 0.5, kid &lt;5 = free) × the fixed ${fmtMoney(perHead)} per-head rate that's been agreed — it doesn't change with the running total expenses below.${gapNote} Anyone who's already spent their own money gets that netted against their share in the table below, including being owed back if they've covered more than their share.${variance}</p>` +
     progressNote;
 
+  // Group the ledger by what's actually left to do, instead of one flat
+  // alphabetical list — a long committee list is hard to scan when every
+  // row looks the same ("Pending") and the one actionable control (the tiny
+  // checkbox) is easy to miss. Sorted biggest-amount-first within a group so
+  // the person owing the most (or most owed back) is the one you see first.
+  const toCollectAll = rows.filter((r) => !r.settled && r.toBePaid > 0);
+  const toPayBackAll = rows.filter((r) => r.owed > 0);
+  const settledAll = rows.filter((r) => r.settled);
+
+  const summaryEl = $("#reportLedgerSummary");
+  if (summaryEl) {
+    summaryEl.textContent = rows.length
+      ? `${toCollectAll.length} to collect · ${toPayBackAll.length} to pay back · ${settledAll.length} settled`
+      : "";
+  }
+
+  const searchTerm = ($("#reportLedgerSearch")?.value || "").toLowerCase().trim();
+  const matches = (r) => !searchTerm || r.name.toLowerCase().includes(searchTerm);
+
   const body = $("#reportLedgerTableBody");
   if (!rows.length) {
-    body.innerHTML = `<tr class="empty-row"><td colspan="6">Add attendees and expenses to see the ledger.</td></tr>`;
+    body.innerHTML = `<tr class="empty-row"><td colspan="5">Add attendees and expenses to see the ledger.</td></tr>`;
   } else {
-    body.innerHTML = rows.map((r) => reportLedgerRowHtml(r, perHead)).join("");
+    const toCollect = toCollectAll.filter(matches).sort((a, b) => b.toBePaid - a.toBePaid);
+    const toPayBack = toPayBackAll.filter(matches).sort((a, b) => b.owed - a.owed);
+    const settled = settledAll.filter(matches).sort((a, b) => a.name.localeCompare(b.name));
+
+    if (!toCollect.length && !toPayBack.length && !settled.length) {
+      body.innerHTML = `<tr class="empty-row"><td colspan="5">No one matches "${escapeHtml(searchTerm)}".</td></tr>`;
+    } else {
+      body.innerHTML =
+        (toCollect.length
+          ? reportSectionRowHtml("collect", "💰 Still to collect", toCollect.length) + toCollect.map((r) => reportLedgerRowHtml(r, perHead)).join("")
+          : "") +
+        (toPayBack.length
+          ? reportSectionRowHtml("payback", "💸 Still to pay back", toPayBack.length) + toPayBack.map((r) => reportLedgerRowHtml(r, perHead)).join("")
+          : "") +
+        (settled.length
+          ? reportSectionRowHtml("settled", "✅ Settled", settled.length) + settled.map((r) => reportLedgerRowHtml(r, perHead)).join("")
+          : "");
+    }
   }
 
   $$("[data-report-paid]", body).forEach((cb) => {
