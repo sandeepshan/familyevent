@@ -643,9 +643,45 @@ tr.row-done td { opacity: 0.6; }
 .report-cell-stack { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 2px; }
 .report-amount { font-weight: 700; }
 #reportLedgerTable tr.report-row-pending { border-left: 3px solid var(--red); }
+#reportLedgerTable tr.report-row-owed { border-left: 3px solid var(--gold); }
 #reportLedgerTable tr.report-row-settled { border-left: 3px solid var(--green); opacity: 0.85; }
+.report-ledger-summary { font-size: 0.78rem; color: var(--ink-soft); font-weight: 600; white-space: nowrap; margin-left: auto; align-self: center; }
+#reportLedgerTable tr.report-section-row td {
+  background: var(--cream-deep);
+  font-weight: 700;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 7px 14px;
+  border-top: none;
+}
+#reportLedgerTable tr.report-section-row.collect td { color: var(--red); }
+#reportLedgerTable tr.report-section-row.payback td { color: var(--gold); }
+#reportLedgerTable tr.report-section-row.settled td { color: var(--green); }
+.report-section-count {
+  display: inline-block;
+  background: var(--white);
+  border-radius: 100px;
+  padding: 1px 8px;
+  margin-left: 6px;
+  font-weight: 700;
+}
+/* The per-row "Paid"/"Paid back" checkbox is the one action on this table —
+   make it read as a tappable button, not a stray tickbox, so it's obvious
+   what to do with each row (and easy to hit with a thumb on mobile). */
+.paid-checkbox-label {
+  border: 1.5px solid var(--line);
+  border-radius: 100px;
+  padding: 4px 10px 4px 8px;
+  margin-top: 2px;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.paid-checkbox-label:hover { background: var(--cream-deep); border-color: var(--peacock); }
+.paid-checkbox-label:has(input:checked) { background: color-mix(in srgb, var(--green) 14%, var(--white)); border-color: var(--green); }
 @media (max-width: 720px) {
   .report-cell-stack { align-items: flex-end; }
+  #reportLedgerTable tr.report-section-row td { display: block; text-align: left; }
+  .table-toolbar .report-ledger-summary { margin-left: 0; width: 100%; }
 }
 
 /* ---------- Category cap bar ---------- */
