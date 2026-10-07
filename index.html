@@ -338,8 +338,10 @@
 
       <div class="card" id="reportActualCard">
         <h3 class="report-card-title">💵 Actually collected (bank reconciliation)</h3>
-        <p class="muted report-legend">Tick a name once their share has genuinely landed in the bank — independent of anything they're separately owed back for their own spending, so this total should tie out to your account exactly. Tap a name below to toggle it.</p>
+        <p class="muted report-legend">Enter exactly what's landed in the bank for each family's share — partial amounts are fine, and this total should tie out to your account exactly. Anyone whose own fronted spending already covers their share needs no bank payment at all, so they're hidden by default.</p>
+        <label class="report-actual-toggle"><input type="checkbox" id="reportActualHideCovered" checked /> Hide people with nothing to pay by bank</label>
         <div class="report-actual-total" id="reportActualTotal">$0</div>
+        <p class="muted report-actual-hidden-note" id="reportActualHiddenNote"></p>
         <div class="report-tie-rows" id="reportActualList"></div>
       </div>
 
@@ -355,7 +357,7 @@
 
       <div class="card table-card">
         <h3 class="report-card-title">🤝 Who owes &amp; who's owed</h3>
-        <p class="muted report-legend">Share = catering cost, paid independently of any spending. Spent = paid out of their own pocket, owed back — the Owed column takes whatever's actually been paid back so far, partial amounts included. Grouped below by what's left to do — biggest amounts first.</p>
+        <p class="muted report-legend">Share = catering cost. Spent = paid out of their own pocket — this is applied against what's left of their share automatically, so "To be paid" and "Owed" are already netted, unless a real bank payment has been separately recorded for the share. Both boxes take whatever's actually been paid so far, partial amounts included. Grouped below by what's left to do — biggest amounts first.</p>
         <div class="table-toolbar">
           <input type="search" id="reportLedgerSearch" placeholder="🔍 Search by name…" class="input" />
           <div class="report-ledger-summary" id="reportLedgerSummary"></div>
