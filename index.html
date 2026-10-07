@@ -336,6 +336,13 @@
         <div class="stat-card"><div class="stat-label">Paid back</div><div class="stat-value good-value" id="reportPaidBack">$0</div></div>
       </div>
 
+      <div class="card" id="reportActualCard">
+        <h3 class="report-card-title">💵 Actually collected (bank reconciliation)</h3>
+        <p class="muted report-legend">Real bank payments only — leaves out anyone whose share was covered entirely by their own spending rather than an actual transfer, so this should tie out to your account.</p>
+        <div class="report-actual-total" id="reportActualTotal">$0</div>
+        <div class="report-tie-rows" id="reportActualList"></div>
+      </div>
+
       <div class="card" id="reportTieCard">
         <h3 class="report-card-title">🧮 How it all ties together</h3>
         <div id="reportTieBody"></div>
