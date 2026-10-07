@@ -845,24 +845,44 @@ function budgetItemDone(b) {
   return typeof b.done === "boolean" ? b.done : b.status === "Purchased";
 }
 // Did a committee member pay for this out of their own pocket (needs
-// reimbursing from the collected funds), and has that reimbursement
-// happened yet? Both default to false for items that predate this field.
+// reimbursing from the collected funds)? Defaults to false for items that
+// predate this field.
 function budgetItemPaidOOP(b) {
   return b.paidOutOfPocket === true;
 }
-function budgetItemReimbursed(b) {
-  return b.reimbursed === true;
+// How much of this item has actually been paid back so far — stored as its
+// own dollar amount rather than a flat yes/no, so a $45 item can show $20
+// paid back and $25 still owed instead of forcing an all-or-nothing flag.
+// Items from before this field existed only have the old boolean `reimbursed`
+// flag, so those are read as either the item's full total (if it was marked
+// reimbursed) or 0.
+function budgetItemReimbursedAmount(b) {
+  const total = budgetItemTotal(b);
+  if (typeof b.reimbursedAmount === "number" && !isNaN(b.reimbursedAmount)) {
+    return Math.max(0, Math.min(b.reimbursedAmount, total));
+  }
+  return b.reimbursed === true ? total : 0;
 }
-// When a committee member is also an attending family, nets their
-// outstanding reimbursement against their own catering share — matched by
-// exact name (case-insensitive) between "Assigned to" and the attendee's
-// family name, so both lists should use the same full names.
+function budgetItemOutstandingAmount(b) {
+  return Math.max(0, budgetItemTotal(b) - budgetItemReimbursedAmount(b));
+}
+// Fully paid back (to within a cent, for float safety) — kept for the
+// Budget tab's 💳/💳✓ badge and anywhere else only a yes/no is needed.
+function budgetItemReimbursed(b) {
+  return budgetItemOutstandingAmount(b) <= 0.005;
+}
+// When a committee member is also an attending family, their still-owed
+// reimbursement is surfaced as its own figure — matched by exact name
+// (case-insensitive) between "Assigned to" and the attendee's family name,
+// so both lists should use the same full names. Never netted against their
+// catering share; partially-reimbursed items count only their remaining
+// outstanding amount.
 function reimbursementCredit(familyName) {
   if (!familyName) return 0;
   const key = familyName.trim().toLowerCase();
   return budgetItems
-    .filter((b) => budgetItemPaidOOP(b) && !budgetItemReimbursed(b) && (b.assignedTo || "").trim().toLowerCase() === key)
-    .reduce((s, b) => s + budgetItemTotal(b), 0);
+    .filter((b) => budgetItemPaidOOP(b) && (b.assignedTo || "").trim().toLowerCase() === key)
+    .reduce((s, b) => s + budgetItemOutstandingAmount(b), 0);
 }
 
 function initBudget() {
@@ -1079,22 +1099,24 @@ function buildCategoryBreakdownHtml() {
 // nothing is ever subtracted from one to reduce the other.
 function buildReportLedgerRows(statsSource, perHead) {
   const spentByKey = {};
+  // Items arrive in the budgetItems array already ordered oldest-first (the
+  // Firestore query is `orderBy("createdAt", "asc")`), so each person's
+  // `items` list preserves that order — this is what lets a single "paid
+  // back $X so far" figure be distributed across their fronted expenses
+  // oldest-first when it's entered, without the UI needing its own ordering.
   budgetItems
     .filter((b) => budgetItemPaidOOP(b))
     .forEach((b) => {
       const who = (b.assignedTo || "").trim();
       if (!who) return;
       const key = who.toLowerCase();
-      if (!spentByKey[key])
-        spentByKey[key] = { name: who, all: 0, unreimbursed: 0, unreimbursedIds: [], reimbursed: 0, reimbursedIds: [] };
-      spentByKey[key].all += budgetItemTotal(b);
-      if (!budgetItemReimbursed(b)) {
-        spentByKey[key].unreimbursed += budgetItemTotal(b);
-        spentByKey[key].unreimbursedIds.push(b.id);
-      } else {
-        spentByKey[key].reimbursed += budgetItemTotal(b);
-        spentByKey[key].reimbursedIds.push(b.id);
-      }
+      if (!spentByKey[key]) spentByKey[key] = { name: who, all: 0, unreimbursed: 0, reimbursed: 0, items: [] };
+      const total = budgetItemTotal(b);
+      const reimbursedAmt = budgetItemReimbursedAmount(b);
+      spentByKey[key].all += total;
+      spentByKey[key].unreimbursed += total - reimbursedAmt;
+      spentByKey[key].reimbursed += reimbursedAmt;
+      spentByKey[key].items.push({ id: b.id, total });
     });
 
   const rows = new Map();
@@ -1110,9 +1132,8 @@ function buildReportLedgerRows(statsSource, perHead) {
       paid: !!a.paid,
       spentAll: spent ? spent.all : 0,
       unreimbursedCredit: spent ? spent.unreimbursed : 0,
-      unreimbursedIds: spent ? spent.unreimbursedIds : [],
       reimbursedCredit: spent ? spent.reimbursed : 0,
-      reimbursedIds: spent ? spent.reimbursedIds : [],
+      oopItems: spent ? spent.items : [],
     });
   });
   // Anyone left over paid for something but isn't (or isn't yet) an attendee.
@@ -1125,9 +1146,8 @@ function buildReportLedgerRows(statsSource, perHead) {
       paid: null,
       spentAll: s.all,
       unreimbursedCredit: s.unreimbursed,
-      unreimbursedIds: s.unreimbursedIds,
       reimbursedCredit: s.reimbursed,
-      reimbursedIds: s.reimbursedIds,
+      oopItems: s.items,
     });
   });
 
@@ -1199,22 +1219,64 @@ function reportLedgerRowHtml(r, perHead) {
           }</label></span>`
         : "—"
     }</td>
-    <td data-label="Owed">${
-      r.owed > 0
-        ? `<span class="report-cell-stack"><span class="report-amount">${fmtMoney(r.owed)}</span><label class="paid-checkbox-label"><input type="checkbox" data-report-reimburse="${r.unreimbursedIds.join(",")}" /> Mark paid back</label></span>`
-        : r.reimbursedCredit > 0
-        ? // Already marked paid back — show it (instead of a flat "—") with the
-          // SAME checkbox, pre-checked, bound to the reimbursed items' own ids,
-          // so unchecking it is a real "undo" (sets reimbursed back to false
-          // and the amount reappears as still-owed on the next render).
-          `<span class="report-cell-stack"><span class="report-amount report-amount-settled">${fmtMoney(
-            r.reimbursedCredit
-          )}</span><label class="paid-checkbox-label checked"><input type="checkbox" checked data-report-reimburse="${r.reimbursedIds.join(
-            ","
-          )}" /> Paid back ↺ undo</label></span>`
-        : "—"
-    }</td>
+    <td data-label="Owed">${r.spentAll > 0 ? reportPaybackCellHtml(r) : "—"}</td>
   </tr>`;
+}
+
+// The "Owed" cell: an editable running total of how much has actually been
+// paid back to this person, out of everything they fronted — not just a
+// yes/no flag, so a partial reimbursement (paid back some of it, not all)
+// can be recorded. Entering a number here is distributed across their own
+// fronted expense items oldest-first (see buildReportLedgerRows), so the
+// per-item figures behind it stay correct even though only one box is shown.
+// The small button alongside is just a shortcut for the common full-amount
+// case — fills the box with the total owed (or back to 0 to undo), same end
+// result as typing it by hand.
+function reportPaybackCellHtml(r) {
+  const itemsSpec = r.oopItems.map((it) => `${it.id}:${it.total}`).join(",");
+  const paidSoFar = Math.round(r.reimbursedCredit * 100) / 100;
+  const fullAmount = Math.round(r.spentAll * 100) / 100;
+  const isFull = r.owed <= 0.005;
+  return `<span class="report-cell-stack">
+    <span class="report-amount${isFull ? " report-amount-settled" : ""}">${fmtMoney(r.owed)}</span>
+    <span class="report-payback-note">${fmtMoney(paidSoFar)} paid back of ${fmtMoney(fullAmount)}</span>
+    <span class="report-payback-row">
+      <input type="number" class="input report-payback-input" min="0" max="${fullAmount}" step="0.01"
+        value="${paidSoFar > 0 ? paidSoFar : ""}" placeholder="0"
+        title="How much has actually been paid back to them so far — partial amounts are fine"
+        data-report-reimburse-items="${itemsSpec}" />
+      <button type="button" class="report-payback-full" data-report-reimburse-set="${isFull ? 0 : fullAmount}" title="${
+    isFull ? "Undo — mark as not paid back" : "Mark the full amount as paid back"
+  }">${isFull ? "↺ undo" : "mark full"}</button>
+    </span>
+  </span>`;
+}
+
+// Takes whatever running total is now in a "paid back $__" box and spreads
+// it across that person's own fronted items, oldest-first, writing each
+// item's own reimbursedAmount — so the single number shown in the ledger
+// stays backed by correct per-item figures underneath (what the Budget
+// tab's 💳/💳✓ badge and the Excel export both read from directly).
+function applyReportPaybackInput(input) {
+  const spec = (input.dataset.reportReimburseItems || "")
+    .split(",")
+    .filter(Boolean)
+    .map((pair) => {
+      const sep = pair.lastIndexOf(":");
+      return { id: pair.slice(0, sep), total: parseFloat(pair.slice(sep + 1)) || 0 };
+    });
+  if (!spec.length) return;
+  const grandTotal = spec.reduce((s, it) => s + it.total, 0);
+  let remaining = Math.max(0, Math.min(parseFloat(input.value) || 0, grandTotal));
+  const updates = spec.map((it) => {
+    const applied = Math.round(Math.min(remaining, it.total) * 100) / 100;
+    remaining = Math.round((remaining - applied) * 100) / 100;
+    return updateDoc(doc(db, "budgetItems", it.id), { reimbursedAmount: applied });
+  });
+  Promise.all(updates).catch((err) => {
+    console.error(err);
+    showToast("Couldn't update — check your connection");
+  });
 }
 
 // One colspan header row marking the start of a group of ledger rows —
@@ -1292,7 +1354,7 @@ function renderReport() {
   // for a tighter at-a-glance reconciliation.
   const oopItems = budgetItems.filter((b) => budgetItemPaidOOP(b));
   const oopTotalAll = oopItems.reduce((s, b) => s + budgetItemTotal(b), 0);
-  const oopReimbursed = oopItems.filter((b) => budgetItemReimbursed(b)).reduce((s, b) => s + budgetItemTotal(b), 0);
+  const oopReimbursed = oopItems.reduce((s, b) => s + budgetItemReimbursedAmount(b), 0);
   $("#reportCollected").textContent = fmtMoney(collected);
   $("#reportOutstanding").textContent = fmtMoney(outstanding);
   $("#reportOwedCommittee").textContent = fmtMoney(owedBack);
@@ -1302,9 +1364,10 @@ function renderReport() {
   // using only values derived from the figures above (never recomputed
   // independently), so the three numbers can never drift apart:
   //   grand       = directlyPaid + oopTotalAll        (by definition)
-  //   oopTotalAll = oopReimbursed + owedBack           (by the 💳✓ flag — every
-  //     fronted dollar is either paid back already, or still owed; share and
-  //     spend no longer net against each other, so there's no third bucket)
+  //   oopTotalAll = oopReimbursed + owedBack           (every fronted dollar
+  //     is tracked as paid-back-amount + still-outstanding-amount on the item
+  //     itself, so a partial payback just shifts dollars between the two —
+  //     share and spend still never net against each other)
   // so oopReimbursed + owedBack === oopTotalAll exactly, always.
   const directlyPaid = grand - oopTotalAll;
   const tieBody = $("#reportTieBody");
@@ -1326,7 +1389,7 @@ function renderReport() {
             owedBack
           )}</strong></div>
         </div>
-        <p class="report-progress-note">A family's own spending and their catering share are tracked separately — paying one never automatically settles the other, so someone can be marked Paid for their share and still separately owed back for something they fronted. "Collected" only counts a share once it's actually marked Paid; "Owed back" is simply whatever's been fronted and not yet paid back, in full. These numbers always reconcile back to the ${fmtMoney(
+        <p class="report-progress-note">A family's own spending and their catering share are tracked separately — paying one never automatically settles the other, so someone can be marked Paid for their share and still separately owed back for something they fronted. "Collected" only counts a share once it's actually marked Paid; "Owed back" is whatever's been fronted and not yet paid back — partial reimbursements are tracked too, so it updates as soon as any amount is paid back, not just once it's fully settled. These numbers always reconcile back to the ${fmtMoney(
           grand
         )} actually spent.</p>`;
     }
@@ -1357,7 +1420,7 @@ function renderReport() {
     ? `<p class="report-progress-note">${doneCount} of ${budgetItems.length} expense${budgetItems.length === 1 ? "" : "s"} purchased so far.</p>`
     : "";
   $("#reportMathExplainer").innerHTML =
-    `<p>A family's share is their weighted catering heads (adult = 1, kid 5–12 = 0.5, kid &lt;5 = free) × the fixed ${fmtMoney(perHead)} per-head rate that's been agreed — it doesn't change with the running total expenses below.${gapNote} Anyone who's spent their own money on an expense is owed that back in full, separately from their catering share — the two are tracked independently in the table below, so paying your own expenses doesn't double as paying your share.${variance}</p>` +
+    `<p>A family's share is their weighted catering heads (adult = 1, kid 5–12 = 0.5, kid &lt;5 = free) × the fixed ${fmtMoney(perHead)} per-head rate that's been agreed — it doesn't change with the running total expenses below.${gapNote} Anyone who's spent their own money on an expense is owed that back, separately from their catering share — the two are tracked independently in the table below, so paying your own expenses doesn't double as paying your share. Paybacks can be partial too — the Owed column takes whatever's actually been paid back so far, not just all-or-nothing.${variance}</p>` +
     progressNote;
 
   // Group the ledger by what's actually left to do, instead of one flat
@@ -1426,13 +1489,15 @@ function renderReport() {
       });
     });
   });
-  $$("[data-report-reimburse]", body).forEach((cb) => {
-    cb.addEventListener("change", () => {
-      const ids = cb.dataset.reportReimburse.split(",").filter(Boolean);
-      Promise.all(ids.map((id) => updateDoc(doc(db, "budgetItems", id), { reimbursed: cb.checked }))).catch((err) => {
-        console.error(err);
-        showToast("Couldn't update — check your connection");
-      });
+  $$(".report-payback-input", body).forEach((input) => {
+    input.addEventListener("change", () => applyReportPaybackInput(input));
+  });
+  $$("[data-report-reimburse-set]", body).forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const input = btn.previousElementSibling;
+      if (!input || !input.classList.contains("report-payback-input")) return;
+      input.value = btn.dataset.reportReimburseSet;
+      applyReportPaybackInput(input);
     });
   });
 
@@ -1869,27 +1934,38 @@ function exportBudgetExcel() {
   }
   XLSX.utils.book_append_sheet(wb, wsOwes, "Who owes what");
 
-  // ---- Reimbursements: the flip side — what the committee owes back ----
+  // ---- Reimbursements: the flip side — what the committee owes back.
+  // "Paid back" and "Outstanding" are their own dollar columns (not a flat
+  // Yes/No) so a partial reimbursement shows exactly what it is — e.g. $20
+  // paid back of a $45 item, $25 still outstanding. ----
   const oopItems = budgetItems.filter((b) => budgetItemPaidOOP(b));
   if (oopItems.length) {
-    const reimburseHeader = ["Paid by", "Item", `Amount (${cur})`, "Reimbursed?"];
+    const reimburseHeader = ["Paid by", "Item", `Amount (${cur})`, `Paid back (${cur})`, `Outstanding (${cur})`];
     const reimburseAoa = [reimburseHeader];
     oopItems
       .slice()
       .sort((a, b) => (a.assignedTo || "").localeCompare(b.assignedTo || ""))
       .forEach((b) => {
-        reimburseAoa.push([b.assignedTo || "Unassigned", b.itemName || "", budgetItemTotal(b), budgetItemReimbursed(b) ? "Yes" : "No"]);
+        reimburseAoa.push([
+          b.assignedTo || "Unassigned",
+          b.itemName || "",
+          budgetItemTotal(b),
+          budgetItemReimbursedAmount(b),
+          budgetItemOutstandingAmount(b),
+        ]);
       });
     const totalOOP = oopItems.reduce((s, b) => s + budgetItemTotal(b), 0);
-    const totalOutstanding = oopItems.filter((b) => !budgetItemReimbursed(b)).reduce((s, b) => s + budgetItemTotal(b), 0);
+    const totalPaidBack = oopItems.reduce((s, b) => s + budgetItemReimbursedAmount(b), 0);
+    const totalOutstanding = oopItems.reduce((s, b) => s + budgetItemOutstandingAmount(b), 0);
     reimburseAoa.push([]);
-    reimburseAoa.push(["TOTAL", "", totalOOP, ""]);
-    reimburseAoa.push(["STILL OWED", "", totalOutstanding, ""]);
+    reimburseAoa.push(["TOTAL", "", totalOOP, totalPaidBack, totalOutstanding]);
     const wsReimburse = XLSX.utils.aoa_to_sheet(reimburseAoa);
-    wsReimburse["!cols"] = [{ wch: 20 }, { wch: 30 }, { wch: 13 }, { wch: 12 }];
+    wsReimburse["!cols"] = [{ wch: 20 }, { wch: 30 }, { wch: 13 }, { wch: 13 }, { wch: 13 }];
     for (let r = 1; r < reimburseAoa.length; r++) {
-      const ref = XLSX.utils.encode_cell({ r, c: 2 });
-      if (wsReimburse[ref] && typeof wsReimburse[ref].v === "number") wsReimburse[ref].z = curFmt;
+      [2, 3, 4].forEach((c) => {
+        const ref = XLSX.utils.encode_cell({ r, c });
+        if (wsReimburse[ref] && typeof wsReimburse[ref].v === "number") wsReimburse[ref].z = curFmt;
+      });
     }
     XLSX.utils.book_append_sheet(wb, wsReimburse, "Reimbursements");
   }
