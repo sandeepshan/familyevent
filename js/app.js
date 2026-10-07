@@ -1061,9 +1061,12 @@ function buildCategoryBreakdownHtml() {
 // anyone who's spent money out of their own pocket (who may or may not also
 // be an attendee), matched by exact name — same matching rule used
 // everywhere else credit is netted. Keeps the attendee record and the ids
-// of their still-unreimbursed expenses so the row can carry its own
-// "mark paid" / "mark paid back" actions — this is now the only place in
-// the app those two things are tracked.
+// of both their still-unreimbursed AND already-reimbursed expenses, so the
+// row can carry its own "mark paid" / "mark paid back" actions AND a way to
+// undo a "paid back" mark — this is now the only place in the app those are
+// tracked. (Marking something paid back makes its id drop out of "owed" —
+// without separately keeping reimbursedIds too, there'd be nothing left for
+// an "undo" control to point at once that happens.)
 function buildReportLedgerRows(statsSource, perHead) {
   const spentByKey = {};
   budgetItems
@@ -1072,11 +1075,15 @@ function buildReportLedgerRows(statsSource, perHead) {
       const who = (b.assignedTo || "").trim();
       if (!who) return;
       const key = who.toLowerCase();
-      if (!spentByKey[key]) spentByKey[key] = { name: who, all: 0, unreimbursed: 0, unreimbursedIds: [] };
+      if (!spentByKey[key])
+        spentByKey[key] = { name: who, all: 0, unreimbursed: 0, unreimbursedIds: [], reimbursed: 0, reimbursedIds: [] };
       spentByKey[key].all += budgetItemTotal(b);
       if (!budgetItemReimbursed(b)) {
         spentByKey[key].unreimbursed += budgetItemTotal(b);
         spentByKey[key].unreimbursedIds.push(b.id);
+      } else {
+        spentByKey[key].reimbursed += budgetItemTotal(b);
+        spentByKey[key].reimbursedIds.push(b.id);
       }
     });
 
@@ -1094,6 +1101,8 @@ function buildReportLedgerRows(statsSource, perHead) {
       spentAll: spent ? spent.all : 0,
       unreimbursedCredit: spent ? spent.unreimbursed : 0,
       unreimbursedIds: spent ? spent.unreimbursedIds : [],
+      reimbursedCredit: spent ? spent.reimbursed : 0,
+      reimbursedIds: spent ? spent.reimbursedIds : [],
     });
   });
   // Anyone left over paid for something but isn't (or isn't yet) an attendee.
@@ -1107,6 +1116,8 @@ function buildReportLedgerRows(statsSource, perHead) {
       spentAll: s.all,
       unreimbursedCredit: s.unreimbursed,
       unreimbursedIds: s.unreimbursedIds,
+      reimbursedCredit: s.reimbursed,
+      reimbursedIds: s.reimbursedIds,
     });
   });
 
@@ -1170,6 +1181,16 @@ function reportLedgerRowHtml(r, perHead) {
     <td data-label="Owed">${
       r.owed > 0
         ? `<span class="report-cell-stack"><span class="report-amount">${fmtMoney(r.owed)}</span><label class="paid-checkbox-label"><input type="checkbox" data-report-reimburse="${r.unreimbursedIds.join(",")}" /> Mark paid back</label></span>`
+        : r.reimbursedCredit > 0
+        ? // Already marked paid back — show it (instead of a flat "—") with the
+          // SAME checkbox, pre-checked, bound to the reimbursed items' own ids,
+          // so unchecking it is a real "undo" (sets reimbursed back to false
+          // and the amount reappears as still-owed on the next render).
+          `<span class="report-cell-stack"><span class="report-amount report-amount-settled">${fmtMoney(
+            r.reimbursedCredit
+          )}</span><label class="paid-checkbox-label checked"><input type="checkbox" checked data-report-reimburse="${r.reimbursedIds.join(
+            ","
+          )}" /> Paid back ↺ undo</label></span>`
         : "—"
     }</td>
   </tr>`;
@@ -1216,9 +1237,17 @@ function renderReport() {
     else outstanding += r.share;
   });
   const owedBack = rows.reduce((s, r) => s + r.owed, 0);
+  // oopReimbursed = everything already paid back to whoever fronted it —
+  // the mirror image of Owed back, so it's computed right alongside it and
+  // surfaced as its own stat tile ("up top", not just buried in a sentence)
+  // for a tighter at-a-glance reconciliation.
+  const oopItems = budgetItems.filter((b) => budgetItemPaidOOP(b));
+  const oopTotalAll = oopItems.reduce((s, b) => s + budgetItemTotal(b), 0);
+  const oopReimbursed = oopItems.filter((b) => budgetItemReimbursed(b)).reduce((s, b) => s + budgetItemTotal(b), 0);
   $("#reportCollected").textContent = fmtMoney(collected);
   $("#reportOutstanding").textContent = fmtMoney(outstanding);
   $("#reportOwedCommittee").textContent = fmtMoney(owedBack);
+  $("#reportPaidBack").textContent = fmtMoney(oopReimbursed);
 
   // Ties Total expenses, Collected and Owed back into one reconciled story,
   // using only values derived from the figures above (never recomputed
@@ -1228,9 +1257,6 @@ function renderReport() {
   //   oopUnreimbursed= selfOffset + owedBack                (always true: for
   //     any person, min(credit,share) + max(0,credit-share) === credit)
   // so oopReimbursed + selfOffset + owedBack === oopTotalAll exactly, always.
-  const oopItems = budgetItems.filter((b) => budgetItemPaidOOP(b));
-  const oopTotalAll = oopItems.reduce((s, b) => s + budgetItemTotal(b), 0);
-  const oopReimbursed = oopItems.filter((b) => budgetItemReimbursed(b)).reduce((s, b) => s + budgetItemTotal(b), 0);
   const selfOffset = rows.reduce((s, r) => s + Math.min(r.unreimbursedCredit, r.share), 0);
   const directlyPaid = grand - oopTotalAll;
   const tieBody = $("#reportTieBody");
