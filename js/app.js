@@ -1252,6 +1252,32 @@ function renderReport() {
     else outstanding += r.share;
   });
   const owedBack = rows.reduce((s, r) => s + r.owed, 0);
+
+  // "Actually collected" is a stricter, bank-reconciliation-only figure —
+  // unlike the "Collected" stat above (which also counts a share as
+  // collected once someone's own spending nets it to zero, since nothing is
+  // left to chase), this only counts money that genuinely moved into the
+  // bank: someone ticked "Mark paid", for exactly the net amount they still
+  // had left after any of their own out-of-pocket spending was offset
+  // against their share. Anyone fully covered by their own spending (never
+  // transferred anything) or still owed back is excluded entirely, so this
+  // total — and the names/amounts behind it — should tie out line-by-line
+  // against actual bank deposits.
+  const actuallyCollectedRows = rows
+    .filter((r) => r.isAttendee && r.paid === true && r.toBePaid > 0)
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const actuallyCollectedTotal = actuallyCollectedRows.reduce((s, r) => s + r.toBePaid, 0);
+  const actualTotalEl = $("#reportActualTotal");
+  if (actualTotalEl) actualTotalEl.textContent = fmtMoney(actuallyCollectedTotal);
+  const actualListEl = $("#reportActualList");
+  if (actualListEl) {
+    actualListEl.innerHTML = actuallyCollectedRows.length
+      ? actuallyCollectedRows
+          .map((r) => `<div class="report-tie-row"><span>${escapeHtml(r.name)}</span><strong>${fmtMoney(r.toBePaid)}</strong></div>`)
+          .join("")
+      : `<p class="report-actual-empty">No bank payments marked "Mark paid" yet.</p>`;
+  }
+
   // oopReimbursed = everything already paid back to whoever fronted it —
   // the mirror image of Owed back, so it's computed right alongside it and
   // surfaced as its own stat tile ("up top", not just buried in a sentence)
