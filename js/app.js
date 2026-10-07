@@ -1225,17 +1225,25 @@ function renderReport() {
   // "Collected" means cash actually in hand: either marked Paid, or their
   // own unreimbursed spending covers their share EXACTLY (nothing left to
   // pay, nothing owed back either — a clean wash). Anyone who's OWED BACK
-  // (their spending exceeds their share) hasn't handed over any cash for
-  // their own share — so, per how he wants it read, their share sits in
-  // Outstanding instead, even though nothing further actually needs
-  // chasing from them (that nuance is what the Owed back table below is
-  // for). This keeps the simple heads × rate math always holding at a
-  // glance, while "Collected" stays honest about real cash received.
+  // (their spending exceeds their share) ALWAYS lands in Outstanding
+  // instead — checked first, before the Paid flag, and unconditionally so.
+  // Without that order, someone could be marked Paid at some point and
+  // *later* end up owed back too (e.g. a fresh out-of-pocket expense pushes
+  // their credit past their share) — their share would then wrongly keep
+  // counting as Collected purely because of a stale checkbox, while they
+  // simultaneously show up under "Still to pay back" below. Owed-back
+  // status always wins that tie. This keeps the simple heads × rate math
+  // always holding at a glance, while "Collected" stays honest about real
+  // cash received.
   let collected = 0;
   let outstanding = 0;
   rows.forEach((r) => {
     if (!r.isAttendee) return; // non-attendee spenders have no catering share
-    const coveredExactlyByOwnSpend = r.unreimbursedCredit >= r.share && r.owed === 0;
+    if (r.owed > 0) {
+      outstanding += r.share;
+      return;
+    }
+    const coveredExactlyByOwnSpend = r.unreimbursedCredit >= r.share;
     if (r.paid === true || coveredExactlyByOwnSpend) collected += r.share;
     else outstanding += r.share;
   });
