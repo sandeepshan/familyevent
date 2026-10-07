@@ -1222,18 +1222,21 @@ function renderReport() {
   // Collected + Outstanding always add up to exactly "heads × perHead" (the
   // total due shown in the formula below) — every attendee's FULL gross
   // share counts toward one or the other, never both and never neither.
-  // Someone whose own unreimbursed spending covers (or exceeds) their share
-  // has nothing left to collect, so their share counts as already Collected
-  // the moment that's true, regardless of a "Paid" checkbox — there's
-  // nothing to physically pay. Owed back is tracked separately (see the
-  // table below for who, and how much) and never reduces or inflates these
-  // two totals, so the simple heads × rate math always holds at a glance.
+  // "Collected" means cash actually in hand: either marked Paid, or their
+  // own unreimbursed spending covers their share EXACTLY (nothing left to
+  // pay, nothing owed back either — a clean wash). Anyone who's OWED BACK
+  // (their spending exceeds their share) hasn't handed over any cash for
+  // their own share — so, per how he wants it read, their share sits in
+  // Outstanding instead, even though nothing further actually needs
+  // chasing from them (that nuance is what the Owed back table below is
+  // for). This keeps the simple heads × rate math always holding at a
+  // glance, while "Collected" stays honest about real cash received.
   let collected = 0;
   let outstanding = 0;
   rows.forEach((r) => {
     if (!r.isAttendee) return; // non-attendee spenders have no catering share
-    const coveredByOwnSpend = r.unreimbursedCredit >= r.share;
-    if (r.paid === true || coveredByOwnSpend) collected += r.share;
+    const coveredExactlyByOwnSpend = r.unreimbursedCredit >= r.share && r.owed === 0;
+    if (r.paid === true || coveredExactlyByOwnSpend) collected += r.share;
     else outstanding += r.share;
   });
   const owedBack = rows.reduce((s, r) => s + r.owed, 0);
@@ -1281,7 +1284,7 @@ function renderReport() {
             owedBack
           )}</strong></div>
         </div>
-        <p class="report-progress-note">Once a person's own spending fully covers their share, that share moves into Collected above with nothing left to physically pay — so Collected, Outstanding and Owed back can each move independently, but these three numbers always reconcile back to the ${fmtMoney(
+        <p class="report-progress-note">A person's share only counts as Collected once real cash is in hand — either marked Paid, or their own spending covers their share exactly. If their spending runs over their share, that excess is what shows as Owed back, and their share instead sits in Outstanding until it's actually settled. Collected, Outstanding and Owed back can each move independently, but these numbers always reconcile back to the ${fmtMoney(
           grand
         )} actually spent.</p>`;
     }
