@@ -1198,9 +1198,13 @@ function reportLedgerRowHtml(r, perHead) {
 
 // One colspan header row marking the start of a group of ledger rows —
 // splits the single flat list into "what needs doing" buckets so someone
-// scanning a long committee list doesn't have to read every row's status.
-function reportSectionRowHtml(cls, label, count) {
-  return `<tr class="report-section-row ${cls}"><td colspan="5">${label} <span class="report-section-count">${count}</span></td></tr>`;
+// scanning a long committee list doesn't have to read every row's status,
+// and totals the section's dollar amount right there so "how much is left
+// in this bucket" never requires manually summing the rows underneath.
+function reportSectionRowHtml(cls, label, count, total) {
+  return `<tr class="report-section-row ${cls}"><td colspan="5"><span>${label} <span class="report-section-count">${count}</span></span><span class="report-section-total">${fmtMoney(
+    total
+  )}</span></td></tr>`;
 }
 
 function renderReport() {
@@ -1356,15 +1360,26 @@ function renderReport() {
     if (!toCollect.length && !toPayBack.length && !settled.length) {
       body.innerHTML = `<tr class="empty-row"><td colspan="5">No one matches "${escapeHtml(searchTerm)}".</td></tr>`;
     } else {
+      // Each section's total is the sum of the figure that section's rows
+      // are actually grouped by — toBePaid for "still to collect", owed for
+      // "still to pay back" — so it reads as "how much is left to do here",
+      // not just a row count. Settled totals by share, since that's the
+      // dollar value that's actually been squared away in that bucket.
+      const toCollectTotal = toCollect.reduce((s, r) => s + r.toBePaid, 0);
+      const toPayBackTotal = toPayBack.reduce((s, r) => s + r.owed, 0);
+      const settledTotal = settled.reduce((s, r) => s + r.share, 0);
       body.innerHTML =
         (toCollect.length
-          ? reportSectionRowHtml("collect", "💰 Still to collect", toCollect.length) + toCollect.map((r) => reportLedgerRowHtml(r, perHead)).join("")
+          ? reportSectionRowHtml("collect", "💰 Still to collect", toCollect.length, toCollectTotal) +
+            toCollect.map((r) => reportLedgerRowHtml(r, perHead)).join("")
           : "") +
         (toPayBack.length
-          ? reportSectionRowHtml("payback", "💸 Still to pay back", toPayBack.length) + toPayBack.map((r) => reportLedgerRowHtml(r, perHead)).join("")
+          ? reportSectionRowHtml("payback", "💸 Still to pay back", toPayBack.length, toPayBackTotal) +
+            toPayBack.map((r) => reportLedgerRowHtml(r, perHead)).join("")
           : "") +
         (settled.length
-          ? reportSectionRowHtml("settled", "✅ Settled", settled.length) + settled.map((r) => reportLedgerRowHtml(r, perHead)).join("")
+          ? reportSectionRowHtml("settled", "✅ Settled", settled.length, settledTotal) +
+            settled.map((r) => reportLedgerRowHtml(r, perHead)).join("")
           : "");
     }
   }
