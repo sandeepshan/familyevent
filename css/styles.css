@@ -629,6 +629,17 @@ tr.row-done td { opacity: 0.6; }
   margin: 2px 0 12px;
 }
 .report-actual-empty { font-size: 0.84rem; color: var(--ink-soft); margin: 0; }
+.report-actual-row { transition: background 0.15s ease; }
+.report-actual-row:has(input:checked) { background: color-mix(in srgb, var(--green) 14%, var(--cream-deep)); }
+.report-actual-row .paid-checkbox-label {
+  border: none;
+  padding: 0;
+  margin: 0;
+  background: none !important;
+  flex: 1;
+  justify-content: flex-start;
+}
+.report-actual-row .paid-checkbox-label input { accent-color: var(--green); width: 15px; height: 15px; }
 .status-pill { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 0.76rem; font-weight: 700; white-space: nowrap; }
 .status-pill.good { background: rgba(46, 160, 110, 0.15); color: var(--green); }
 .status-pill.bad { background: rgba(216, 70, 70, 0.12); color: var(--red); }
