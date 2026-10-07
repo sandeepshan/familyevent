@@ -1059,14 +1059,24 @@ function buildCategoryBreakdownHtml() {
 
 // One row per person: merges attendees (who owe a catering share) with
 // anyone who's spent money out of their own pocket (who may or may not also
-// be an attendee), matched by exact name — same matching rule used
-// everywhere else credit is netted. Keeps the attendee record and the ids
-// of both their still-unreimbursed AND already-reimbursed expenses, so the
-// row can carry its own "mark paid" / "mark paid back" actions AND a way to
-// undo a "paid back" mark — this is now the only place in the app those are
-// tracked. (Marking something paid back makes its id drop out of "owed" —
-// without separately keeping reimbursedIds too, there'd be nothing left for
-// an "undo" control to point at once that happens.)
+// be an attendee), matched by exact name. Keeps the attendee record and the
+// ids of both their still-unreimbursed AND already-reimbursed expenses, so
+// the row can carry its own "mark paid" / "mark paid back" actions AND a way
+// to undo a "paid back" mark — this is now the only place in the app those
+// are tracked. (Marking something paid back makes its id drop out of "owed"
+// — without separately keeping reimbursedIds too, there'd be nothing left
+// for an "undo" control to point at once that happens.)
+//
+// A person's catering share and their own out-of-pocket spending are fully
+// INDEPENDENT facts, not netted against each other: someone can pay their
+// own family's share in full via bank transfer AND separately still be owed
+// back for money they fronted on an unrelated expense (e.g. they paid their
+// share normally, then later covered a purchase that hasn't been
+// reimbursed yet) — netting the two together hid that case entirely, making
+// it impossible to mark the share paid once any of their own spending had
+// already zeroed it out. So "to be paid" is just the share itself unless
+// marked Paid, and "owed" is simply their unreimbursed spend in full —
+// nothing is ever subtracted from one to reduce the other.
 function buildReportLedgerRows(statsSource, perHead) {
   const spentByKey = {};
   budgetItems
@@ -1123,10 +1133,9 @@ function buildReportLedgerRows(statsSource, perHead) {
 
   return Array.from(rows.values())
     .map((r) => {
-      const net = r.share - r.unreimbursedCredit;
-      const toBePaid = Math.max(0, net);
-      const owed = Math.max(0, -net);
-      const settled = owed === 0 && (toBePaid === 0 || r.paid === true);
+      const toBePaid = r.isAttendee && !r.paid ? r.share : 0;
+      const owed = r.unreimbursedCredit;
+      const settled = owed === 0 && toBePaid === 0;
       return { ...r, toBePaid, owed, settled };
     })
     .sort((a, b) => {
@@ -1156,8 +1165,7 @@ function avatarHtml(name) {
 
 function reportLedgerRowHtml(r, perHead) {
   const w = r.attendee ? cateringWeight(r.attendee) : 0;
-  const net = r.share - r.unreimbursedCredit;
-  const waHref = r.attendee ? costSplitWhatsappHref(r.attendee, net, w, perHead, r.unreimbursedCredit) : "";
+  const waHref = r.attendee ? costSplitWhatsappHref(r.attendee, w, perHead, r.owed) : "";
   // Which bucket a row is in (to collect / to pay back / settled) is now
   // shown by the section header it sits under, so the row itself no longer
   // repeats a "Pending"/"Settled" status pill — just a matching left-border
@@ -1174,8 +1182,21 @@ function reportLedgerRowHtml(r, perHead) {
     <td data-label="Share">${r.isAttendee ? fmtMoney(r.share) : "—"}</td>
     <td data-label="Spent">${r.spentAll > 0 ? fmtMoney(r.spentAll) : "—"}</td>
     <td data-label="To be paid">${
-      r.toBePaid > 0
-        ? `<span class="report-cell-stack"><span class="report-amount">${fmtMoney(r.toBePaid)}</span><label class="paid-checkbox-label"><input type="checkbox" data-report-paid="${r.attendee.id}" ${r.paid ? "checked" : ""} /> Mark paid</label></span>`
+      // Shown whenever there's a share at all, regardless of paid status —
+      // the checkbox's checked/unchecked state is what conveys paid or not,
+      // so marking someone Paid never makes this control disappear, it just
+      // flips to a checked "undo" state (same pattern as the Owed column
+      // below). This is also what keeps "Mark paid" available even when
+      // someone is separately owed back for their own spending — share and
+      // owed are independent, so one never hides the other's control.
+      r.isAttendee && r.share > 0
+        ? `<span class="report-cell-stack"><span class="report-amount${
+            r.paid ? " report-amount-settled" : ""
+          }">${fmtMoney(r.share)}</span><label class="paid-checkbox-label${
+            r.paid ? " checked" : ""
+          }"><input type="checkbox" data-report-paid="${r.attendee.id}" ${r.paid ? "checked" : ""} /> ${
+            r.paid ? "Paid ↺ undo" : "Mark paid"
+          }</label></span>`
         : "—"
     }</td>
     <td data-label="Owed">${
@@ -1226,56 +1247,43 @@ function renderReport() {
   // Collected + Outstanding always add up to exactly "heads × perHead" (the
   // total due shown in the formula below) — every attendee's FULL gross
   // share counts toward one or the other, never both and never neither.
-  // "Collected" means cash actually in hand: either marked Paid, or their
-  // own unreimbursed spending covers their share EXACTLY (nothing left to
-  // pay, nothing owed back either — a clean wash). Anyone who's OWED BACK
-  // (their spending exceeds their share) ALWAYS lands in Outstanding
-  // instead — checked first, before the Paid flag, and unconditionally so.
-  // Without that order, someone could be marked Paid at some point and
-  // *later* end up owed back too (e.g. a fresh out-of-pocket expense pushes
-  // their credit past their share) — their share would then wrongly keep
-  // counting as Collected purely because of a stale checkbox, while they
-  // simultaneously show up under "Still to pay back" below. Owed-back
-  // status always wins that tie. This keeps the simple heads × rate math
-  // always holding at a glance, while "Collected" stays honest about real
-  // cash received.
+  // A share is Collected purely based on the Paid flag now — whether
+  // someone's own spending happens to be fully, partly, or not reimbursed is
+  // a completely separate fact (tracked by Owed back below) that never
+  // affects whether their share itself has been paid.
   let collected = 0;
   let outstanding = 0;
   rows.forEach((r) => {
     if (!r.isAttendee) return; // non-attendee spenders have no catering share
-    if (r.owed > 0) {
-      outstanding += r.share;
-      return;
-    }
-    const coveredExactlyByOwnSpend = r.unreimbursedCredit >= r.share;
-    if (r.paid === true || coveredExactlyByOwnSpend) collected += r.share;
+    if (r.paid === true) collected += r.share;
     else outstanding += r.share;
   });
   const owedBack = rows.reduce((s, r) => s + r.owed, 0);
 
-  // "Actually collected" is a stricter, bank-reconciliation-only figure —
-  // unlike the "Collected" stat above (which also counts a share as
-  // collected once someone's own spending nets it to zero, since nothing is
-  // left to chase), this only counts money that genuinely moved into the
-  // bank: someone ticked "Mark paid", for exactly the net amount they still
-  // had left after any of their own out-of-pocket spending was offset
-  // against their share. Anyone fully covered by their own spending (never
-  // transferred anything) or still owed back is excluded entirely, so this
-  // total — and the names/amounts behind it — should tie out line-by-line
-  // against actual bank deposits.
-  const actuallyCollectedRows = rows
-    .filter((r) => r.isAttendee && r.paid === true && r.toBePaid > 0)
-    .sort((a, b) => a.name.localeCompare(b.name));
-  const actuallyCollectedTotal = actuallyCollectedRows.reduce((s, r) => s + r.toBePaid, 0);
+  // "Actually collected" is the editable face of that same Paid flag — a
+  // dedicated bank-reconciliation checklist listing every attendee (not just
+  // already-paid ones) with their share and a checkbox, so you can tick
+  // people off against your bank statement as you go, or correct a stray
+  // flag (someone ticked Paid who never actually transferred anything)
+  // right here. Its total always matches "Collected" above, since they're
+  // now driven by the exact same thing: real bank payment, nothing netted.
+  const actualRows = rows.filter((r) => r.isAttendee).sort((a, b) => a.name.localeCompare(b.name));
   const actualTotalEl = $("#reportActualTotal");
-  if (actualTotalEl) actualTotalEl.textContent = fmtMoney(actuallyCollectedTotal);
+  if (actualTotalEl) actualTotalEl.textContent = fmtMoney(collected);
   const actualListEl = $("#reportActualList");
   if (actualListEl) {
-    actualListEl.innerHTML = actuallyCollectedRows.length
-      ? actuallyCollectedRows
-          .map((r) => `<div class="report-tie-row"><span>${escapeHtml(r.name)}</span><strong>${fmtMoney(r.toBePaid)}</strong></div>`)
+    actualListEl.innerHTML = actualRows.length
+      ? actualRows
+          .map(
+            (r) =>
+              `<div class="report-tie-row report-actual-row"><label class="paid-checkbox-label report-actual-check${
+                r.paid ? " checked" : ""
+              }"><input type="checkbox" data-report-paid="${r.attendee.id}" ${
+                r.paid ? "checked" : ""
+              } /> ${escapeHtml(r.name)}</label><strong>${fmtMoney(r.share)}</strong></div>`
+          )
           .join("")
-      : `<p class="report-actual-empty">No bank payments marked "Mark paid" yet.</p>`;
+      : `<p class="report-actual-empty">Add attendees to start reconciling.</p>`;
   }
 
   // oopReimbursed = everything already paid back to whoever fronted it —
@@ -1293,12 +1301,11 @@ function renderReport() {
   // Ties Total expenses, Collected and Owed back into one reconciled story,
   // using only values derived from the figures above (never recomputed
   // independently), so the three numbers can never drift apart:
-  //   grand          = directlyPaid + oopTotalAll          (by definition)
-  //   oopTotalAll    = oopReimbursed + oopUnreimbursed      (by the 💳✓ flag)
-  //   oopUnreimbursed= selfOffset + owedBack                (always true: for
-  //     any person, min(credit,share) + max(0,credit-share) === credit)
-  // so oopReimbursed + selfOffset + owedBack === oopTotalAll exactly, always.
-  const selfOffset = rows.reduce((s, r) => s + Math.min(r.unreimbursedCredit, r.share), 0);
+  //   grand       = directlyPaid + oopTotalAll        (by definition)
+  //   oopTotalAll = oopReimbursed + owedBack           (by the 💳✓ flag — every
+  //     fronted dollar is either paid back already, or still owed; share and
+  //     spend no longer net against each other, so there's no third bucket)
+  // so oopReimbursed + owedBack === oopTotalAll exactly, always.
   const directlyPaid = grand - oopTotalAll;
   const tieBody = $("#reportTieBody");
   if (tieBody) {
@@ -1315,14 +1322,11 @@ function renderReport() {
         )}</strong> was fronted personally by whoever paid for it (the 💳 items on the Budget tab). Here's what happened to that fronted money:</p>` +
         `<div class="report-tie-rows">
           <div class="report-tie-row"><span>Already paid back to them</span><strong>${fmtMoney(oopReimbursed)}</strong></div>
-          <div class="report-tie-row"><span>Offsets against their own family's share (see the table below for whose)</span><strong>${fmtMoney(
-            selfOffset
-          )}</strong></div>
           <div class="report-tie-row highlight"><span>Still to pay back — this is the <strong>Owed back</strong> figure above</span><strong>${fmtMoney(
             owedBack
           )}</strong></div>
         </div>
-        <p class="report-progress-note">A person's share only counts as Collected once real cash is in hand — either marked Paid, or their own spending covers their share exactly. If their spending runs over their share, that excess is what shows as Owed back, and their share instead sits in Outstanding until it's actually settled. Collected, Outstanding and Owed back can each move independently, but these numbers always reconcile back to the ${fmtMoney(
+        <p class="report-progress-note">A family's own spending and their catering share are tracked separately — paying one never automatically settles the other, so someone can be marked Paid for their share and still separately owed back for something they fronted. "Collected" only counts a share once it's actually marked Paid; "Owed back" is simply whatever's been fronted and not yet paid back, in full. These numbers always reconcile back to the ${fmtMoney(
           grand
         )} actually spent.</p>`;
     }
@@ -1353,7 +1357,7 @@ function renderReport() {
     ? `<p class="report-progress-note">${doneCount} of ${budgetItems.length} expense${budgetItems.length === 1 ? "" : "s"} purchased so far.</p>`
     : "";
   $("#reportMathExplainer").innerHTML =
-    `<p>A family's share is their weighted catering heads (adult = 1, kid 5–12 = 0.5, kid &lt;5 = free) × the fixed ${fmtMoney(perHead)} per-head rate that's been agreed — it doesn't change with the running total expenses below.${gapNote} Anyone who's already spent their own money gets that netted against their share in the table below, including being owed back if they've covered more than their share.${variance}</p>` +
+    `<p>A family's share is their weighted catering heads (adult = 1, kid 5–12 = 0.5, kid &lt;5 = free) × the fixed ${fmtMoney(perHead)} per-head rate that's been agreed — it doesn't change with the running total expenses below.${gapNote} Anyone who's spent their own money on an expense is owed that back in full, separately from their catering share — the two are tracked independently in the table below, so paying your own expenses doesn't double as paying your share.${variance}</p>` +
     progressNote;
 
   // Group the ledger by what's actually left to do, instead of one flat
@@ -1410,7 +1414,11 @@ function renderReport() {
     }
   }
 
-  $$("[data-report-paid]", body).forEach((cb) => {
+  // Scoped to the whole tab, not just the ledger body, so this also wires up
+  // the checkboxes in the "Actually collected" reconciliation list above —
+  // both point at the exact same attendee.paid field.
+  const reportTab = $("#tab-report");
+  $$("[data-report-paid]", reportTab).forEach((cb) => {
     cb.addEventListener("change", () => {
       updateDoc(doc(db, "attendees", cb.dataset.reportPaid), { paid: cb.checked }).catch((err) => {
         console.error(err);
@@ -1521,15 +1529,17 @@ function buildCostSplitCardCanvas(statsSource, grand, perHead) {
     }
     const w = cateringWeight(a);
     const grossShare = w * perHead;
+    // Share and credit are independent facts now — the credit (if any) is
+    // shown as its own owed-back note, never subtracted from the share
+    // itself, since paying their own expenses doesn't also pay their share.
     const credit = reimbursementCredit(a.familyName);
-    const netShare = grossShare - credit;
     ctx.fillStyle = "#1c2b29";
     ctx.font = "700 30px Inter, sans-serif";
     ctx.fillText(a.familyName, cardX + 32, y + 40);
     ctx.font = "500 20px Inter, sans-serif";
     ctx.fillStyle = "#586b67";
     ctx.fillText(
-      credit > 0 ? `${formatWeight(w)} heads · ${fmtMoney(credit)} credit applied` : `${formatWeight(w)} heads`,
+      credit > 0 ? `${formatWeight(w)} heads · ${fmtMoney(credit)} owed back to them` : `${formatWeight(w)} heads`,
       cardX + 32,
       y + 68
     );
@@ -1537,7 +1547,7 @@ function buildCostSplitCardCanvas(statsSource, grand, perHead) {
     ctx.textAlign = "right";
     ctx.font = "800 32px Inter, sans-serif";
     ctx.fillStyle = "#7c0d44";
-    ctx.fillText(fmtMoney(netShare), cardX + cardW - 32, y + 40);
+    ctx.fillText(fmtMoney(grossShare), cardX + cardW - 32, y + 40);
     ctx.font = "700 20px Inter, sans-serif";
     ctx.fillStyle = a.paid ? "#2f8f63" : "#c0392b";
     ctx.fillText(a.paid ? "✅ Paid" : "Unpaid", cardX + cardW - 32, y + 68);
@@ -1829,10 +1839,11 @@ function exportBudgetExcel() {
   }
   XLSX.utils.book_append_sheet(wb, wsCats, "By category");
 
-  // ---- Who owes what: each family's exact share, netted against any
-  // reimbursement credit if that family is also a committee member who
-  // paid for expenses out of pocket ----
-  const owesHeader = ["Family", "Catering heads", `Share (${cur})`, `Credit (${cur})`, `Net due (${cur})`, "Paid?"];
+  // ---- Who owes what: each family's exact share and Paid status, plus
+  // (as its own independent column, never subtracted from the share) any
+  // reimbursement credit still owed back to them if they're also someone
+  // who paid for an expense out of their own pocket ----
+  const owesHeader = ["Family", "Catering heads", `Share (${cur})`, "Paid?", `Owed back (${cur})`];
   const owesAoa = [owesHeader];
   let totalCredit = 0;
   statsSource.forEach((a) => {
@@ -1840,18 +1851,18 @@ function exportBudgetExcel() {
     const grossShare = w * perHead;
     const credit = reimbursementCredit(a.familyName);
     totalCredit += credit;
-    owesAoa.push([a.familyName || "", w, grossShare, credit, grossShare - credit, a.paid ? "Yes" : "No"]);
+    owesAoa.push([a.familyName || "", w, grossShare, a.paid ? "Yes" : "No", credit]);
   });
   owesAoa.push([]);
   // Total share = sum of each family's fixed-rate share (heads × perHead),
   // NOT the live budget `grand` total — the two no longer have to match now
   // that perHead is a flat agreed rate rather than grand ÷ heads.
   const totalShare = t.cateringHeads * perHead;
-  owesAoa.push(["TOTAL", t.cateringHeads, totalShare, totalCredit, totalShare - totalCredit, ""]);
+  owesAoa.push(["TOTAL", t.cateringHeads, totalShare, "", totalCredit]);
   const wsOwes = XLSX.utils.aoa_to_sheet(owesAoa);
-  wsOwes["!cols"] = [{ wch: 24 }, { wch: 15 }, { wch: 13 }, { wch: 13 }, { wch: 13 }, { wch: 8 }];
+  wsOwes["!cols"] = [{ wch: 24 }, { wch: 15 }, { wch: 13 }, { wch: 8 }, { wch: 13 }];
   for (let r = 1; r < owesAoa.length; r++) {
-    [2, 3, 4].forEach((c) => {
+    [2, 4].forEach((c) => {
       const ref = XLSX.utils.encode_cell({ r, c });
       if (wsOwes[ref] && typeof wsOwes[ref].v === "number") wsOwes[ref].z = curFmt;
     });
@@ -4139,10 +4150,11 @@ function attendeeWhatsappHref(a) {
 // list — distinct from the general event reminder above. Includes the
 // optional payment note (UPI/bank/PayID etc.) from Settings when set, so
 // a family can pay straight from the message without asking the committee
-// how. `credit` is any outstanding reimbursement netted off because this
-// family is also a committee member who paid for expenses themselves —
-// see reimbursementCredit().
-function costSplitMessageText(a, netShare, w, perHead, credit) {
+// how. `owed` is whatever the family is separately owed back for their own
+// out-of-pocket spending (see reimbursementCredit()) — stated as its own
+// fact now, never subtracted from the share: paying your own expenses
+// doesn't double as paying your family's catering share.
+function costSplitMessageText(a, w, perHead, owed) {
   const name = eventInfo.eventName || "our get-together";
   const start = eventStartDateTime();
   const dateStr = start
@@ -4153,22 +4165,21 @@ function costSplitMessageText(a, netShare, w, perHead, credit) {
   if (dateStr) msg += ` on ${dateStr}`;
   msg += `, your family's share is ${fmtMoney(grossShare)} (${formatWeight(w)} catering head${
     w === 1 ? "" : "s"
-  } × ${fmtMoney(perHead)}/head).`;
-  if (credit > 0) {
-    msg += ` After the ${fmtMoney(credit)} you've already covered for expenses, that leaves ${
-      netShare >= 0 ? fmtMoney(netShare) + " still to pay" : fmtMoney(-netShare) + " owed back to you"
-    }.`;
+  } × ${fmtMoney(perHead)}/head)`;
+  msg += a.paid ? " — already marked as paid, thank you!" : ".";
+  if (owed > 0) {
+    msg += ` Separately, we still owe you ${fmtMoney(owed)} back for what you've covered out of pocket.`;
   }
-  if (netShare > 0 && eventInfo.paymentNote && eventInfo.paymentNote.trim()) msg += ` ${eventInfo.paymentNote.trim()}`;
+  if (!a.paid && eventInfo.paymentNote && eventInfo.paymentNote.trim()) msg += ` ${eventInfo.paymentNote.trim()}`;
   msg += " Thank you! 🙏";
   return msg;
 }
 
-function costSplitWhatsappHref(a, netShare, w, perHead, credit) {
+function costSplitWhatsappHref(a, w, perHead, owed) {
   if (!a || !a.phone) return "";
   const digits = a.phone.replace(/[^\d+]/g, "").replace(/^\+/, "");
   if (!digits) return "";
-  const text = encodeURIComponent(costSplitMessageText(a, netShare, w, perHead, credit));
+  const text = encodeURIComponent(costSplitMessageText(a, w, perHead, owed));
   return `https://wa.me/${digits}?text=${text}`;
 }
 
